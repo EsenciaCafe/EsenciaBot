@@ -36,20 +36,32 @@ const MONTH_NUMBERS: Record<string, number> = {
   diciembre: 12
 };
 
-const quickKeyboard = {
+export const mainKeyboard = {
   inline_keyboard: [
     [
       { text: '📊 Hoy', callback_data: 'summary:today' },
-      { text: '💶 Caja', callback_data: 'cash:today' }
+      { text: '📅 Ayer', callback_data: 'summary:yesterday' }
     ],
     [
-      { text: '🏆 Top hoy', callback_data: 'top:today' },
-      { text: '📅 Este mes', callback_data: 'summary:month' }
+      { text: '🗓 Este mes', callback_data: 'summary:month' },
+      { text: '🏆 Top', callback_data: 'picker:top' }
     ],
     [
-      { text: '🗑️ Vaciados hoy', callback_data: 'voids:today' }
+      { text: '💶 Caja', callback_data: 'picker:cash' },
+      { text: '🗑️ Vaciados', callback_data: 'picker:voids' }
+    ],
+    [
+      { text: '🔎 Buscar producto', callback_data: 'prompt:product' },
+      { text: 'ℹ️ Ayuda', callback_data: 'help:main' }
     ]
   ]
+};
+
+const PRODUCT_PROMPT_MARKER = '🔎 Buscar producto';
+const DATE_PROMPT_MARKERS: Record<string, string> = {
+  top: '🏆 Top · otra fecha',
+  cash: '💶 Caja · otra fecha',
+  voids: '🗑️ Vaciados · otra fecha'
 };
 
 function jsonResponse(body: unknown, status = 200) {
@@ -611,21 +623,17 @@ export function productMessage(
 
 function helpMessage() {
   return [
-    '👋 <b>Bot privado del TPV</b>',
+    '👋 <b>Asistente privado de Esencia</b>',
     '',
-    'Puedes preguntarme:',
+    'Usa los botones o pregúntame directamente:',
     '• “¿Cuánto hemos vendido hoy?”',
     '• “¿Cuántos mini pancakes se vendieron el día 20?”',
     '• “¿Cuántos latte se vendieron el 20/07?”',
     '• “Top de productos este mes”',
     '• “Caja de ayer”',
     '',
-    '<b>Comandos</b>',
-    '/hoy · /ayer · /mes',
-    '/caja [hoy|ayer|mes]',
-    '/top [hoy|ayer|mes]',
-    '/producto nombre [hoy|ayer|mes|fecha]',
-    '/vaciados [hoy|ayer|mes]'
+    'Pulsa <b>Buscar producto</b> para que te guíe paso a paso.',
+    'Con <code>/menu</code> puedes recuperar siempre el menú principal.'
   ].join('\n');
 }
 
@@ -679,12 +687,85 @@ async function telegram(method: string, body: JsonRecord) {
   return payload.result;
 }
 
-async function answer(chatId: number, text: string) {
+async function answer(chatId: number, text: string, replyMarkup: JsonRecord = mainKeyboard) {
   await telegram('sendMessage', {
     chat_id: chatId,
     text,
     parse_mode: 'HTML',
-    reply_markup: quickKeyboard
+    reply_markup: replyMarkup
+  });
+}
+
+export function periodPickerKeyboard(action: 'top' | 'cash' | 'voids') {
+  return {
+    inline_keyboard: [
+      [
+        { text: '📊 Hoy', callback_data: `${action}:today` },
+        { text: '📅 Ayer', callback_data: `${action}:yesterday` },
+        { text: '🗓 Mes', callback_data: `${action}:month` }
+      ],
+      [
+        { text: '📆 Otra fecha', callback_data: `prompt:${action}-date` },
+        { text: '⬅️ Menú', callback_data: 'menu:main' }
+      ]
+    ]
+  };
+}
+
+function pickerTitle(action: string) {
+  if (action === 'cash') return '💶 <b>Caja</b>';
+  if (action === 'voids') return '🗑️ <b>Vaciados</b>';
+  return '🏆 <b>Top de artículos</b>';
+}
+
+async function sendPeriodPicker(chatId: number, action: 'top' | 'cash' | 'voids') {
+  await answer(
+    chatId,
+    `${pickerTitle(action)}\n\nElige el periodo que quieres consultar:`,
+    periodPickerKeyboard(action)
+  );
+}
+
+async function sendGuidedPrompt(chatId: number, marker: string, instruction: string) {
+  await answer(chatId, [
+    `<b>${marker}</b>`,
+    '',
+    instruction,
+    '',
+    'También puedes cancelar pulsando <code>/menu</code>.'
+  ].join('\n'), {
+    force_reply: true,
+    input_field_placeholder: 'Escribe aquí…',
+    selective: true
+  });
+}
+
+export function guidedReplyText(message: JsonRecord, originalText: string) {
+  if (/^\/?menu\b/.test(normalize(originalText))) return '/menu';
+  const replyTo = message.reply_to_message as JsonRecord | undefined;
+  const prompt = String(replyTo?.text || '');
+  if (prompt.includes(PRODUCT_PROMPT_MARKER)) return `/producto ${originalText}`;
+  const action = Object.entries(DATE_PROMPT_MARKERS)
+    .find(([, marker]) => prompt.includes(marker))?.[0];
+  if (action === 'cash') return `/caja ${originalText}`;
+  if (action === 'voids') return `/vaciados ${originalText}`;
+  if (action === 'top') return `/top ${originalText}`;
+  return originalText;
+}
+
+async function configureTelegramCommands() {
+  await telegram('setMyCommands', {
+    commands: [
+      { command: 'hoy', description: 'Resumen de hoy' },
+      { command: 'ayer', description: 'Resumen de ayer' },
+      { command: 'mes', description: 'Resumen del mes' },
+      { command: 'top', description: 'Productos más registrados' },
+      { command: 'caja', description: 'Desglose de cobros' },
+      { command: 'producto', description: 'Buscar un producto' },
+      { command: 'vaciados', description: 'Consultar vaciados' },
+      { command: 'menu', description: 'Abrir el menú principal' },
+      { command: 'ayuda', description: 'Ver ejemplos y ayuda' }
+    ]
   });
 }
 
@@ -896,7 +977,8 @@ Deno.serve(async request => {
       return jsonResponse({ ok: true });
     }
 
-    const text = String(callback?.data || message?.text || '');
+    let text = String(callback?.data || message?.text || '');
+    if (!callback && message) text = guidedReplyText(message, text);
     const voidStatus = text.match(/^vs:([01]):(EMPTY-[A-Za-z0-9-]{8,80})$/);
     if (callback?.id && voidStatus) {
       const countsInStatistics = voidStatus[1] === '1';
@@ -923,8 +1005,81 @@ Deno.serve(async request => {
       }
       return jsonResponse({ ok: true });
     }
+
+    const picker = text.match(/^picker:(top|cash|voids)$/);
+    if (callback?.id && picker) {
+      await telegram('answerCallbackQuery', { callback_query_id: callback.id });
+      await sendPeriodPicker(chatId, picker[1] as 'top' | 'cash' | 'voids');
+      return jsonResponse({ ok: true });
+    }
+
+    const datePrompt = text.match(/^prompt:(top|cash|voids)-date$/);
+    if (callback?.id && datePrompt) {
+      await telegram('answerCallbackQuery', { callback_query_id: callback.id });
+      const action = datePrompt[1];
+      await sendGuidedPrompt(
+        chatId,
+        DATE_PROMPT_MARKERS[action],
+        'Escribe la fecha. Ejemplos: <code>día 20</code>, <code>20/07</code> o <code>20 de julio</code>.'
+      );
+      return jsonResponse({ ok: true });
+    }
+
+    if (callback?.id && text === 'prompt:product') {
+      await telegram('answerCallbackQuery', { callback_query_id: callback.id });
+      await sendGuidedPrompt(
+        chatId,
+        PRODUCT_PROMPT_MARKER,
+        'Escribe el producto y, si quieres, el periodo. Ejemplos: <code>latte ayer</code> o <code>mini pancakes día 20</code>.'
+      );
+      return jsonResponse({ ok: true });
+    }
+
+    if (callback?.id && (text === 'menu:main' || text === 'help:main')) {
+      await telegram('answerCallbackQuery', { callback_query_id: callback.id });
+      await answer(
+        chatId,
+        text === 'help:main' ? helpMessage() : 'Elige qué quieres consultar:',
+        mainKeyboard
+      );
+      return jsonResponse({ ok: true });
+    }
+
     if (callback?.id) {
       await telegram('answerCallbackQuery', { callback_query_id: callback.id });
+    }
+
+    const normalizedText = normalize(text);
+    if (/^\/?menu\b/.test(normalizedText)) {
+      await answer(chatId, 'Elige qué quieres consultar:', mainKeyboard);
+      return jsonResponse({ ok: true });
+    }
+    if (/^\/?start\b/.test(normalizedText)) {
+      try {
+        await configureTelegramCommands();
+      } catch (error) {
+        console.error('[telegram-sales-bot] No se pudo actualizar el menú de comandos', error);
+      }
+    }
+    if (/^\/top$/.test(normalizedText)) {
+      await sendPeriodPicker(chatId, 'top');
+      return jsonResponse({ ok: true });
+    }
+    if (/^\/caja$/.test(normalizedText)) {
+      await sendPeriodPicker(chatId, 'cash');
+      return jsonResponse({ ok: true });
+    }
+    if (/^\/vaciados$/.test(normalizedText)) {
+      await sendPeriodPicker(chatId, 'voids');
+      return jsonResponse({ ok: true });
+    }
+    if (/^\/producto$/.test(normalizedText)) {
+      await sendGuidedPrompt(
+        chatId,
+        PRODUCT_PROMPT_MARKER,
+        'Escribe el producto y, si quieres, el periodo. Ejemplos: <code>latte ayer</code> o <code>mini pancakes día 20</code>.'
+      );
+      return jsonResponse({ ok: true });
     }
 
     const intent = intentFor(text);

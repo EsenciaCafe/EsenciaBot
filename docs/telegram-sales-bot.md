@@ -13,7 +13,9 @@ incluidos en `TELEGRAM_ALLOWED_USER_IDS`.
 - Diez artículos con más unidades registradas, sumando ventas cobradas y vaciados.
 - Búsqueda por artículo con ventas cobradas, vaciados y total combinado.
 - Consultas de fechas concretas: `día 20`, `20/07/2026` o `20 de julio`.
-- Botones rápidos y preguntas sencillas en lenguaje natural.
+- Menú principal con accesos a hoy, ayer, mes, top, caja, vaciados y productos.
+- Selectores de periodo para evitar escribir comandos manualmente.
+- Búsqueda guiada de productos y fechas mediante respuestas de Telegram.
 - Aviso inmediato cuando se vacía una mesa, comanda o venta directa.
 - Resumen de pedidos vaciados por día desde una base de auditoría independiente.
 - Exclusión reversible de vaciados de prueba mediante un botón privado en Telegram.
@@ -69,6 +71,7 @@ Content-Type: application/json
 ```
 
 Comprueba el resultado con `getWebhookInfo` y escribe `/start` al bot.
+Al ejecutar `/start`, el bot registra también su menú de comandos en Telegram.
 
 ## Consultas de ejemplo
 
@@ -94,6 +97,19 @@ evitar ambigüedades también se puede indicar `día 20 del mes pasado`, `20/07`
 El ranking `/top` muestra el total combinado y el desglose de cada artículo. Por
 ejemplo, 5 latte cobrados y 3 latte vaciados aparecen como 8 unidades:
 `5 vendidas + 3 vaciadas`.
+
+## Menú y botones
+
+El menú principal ofrece:
+
+- **Hoy**, **Ayer** y **Este mes** para abrir directamente el resumen.
+- **Top**, **Caja** y **Vaciados**, que primero permiten elegir el periodo.
+- **Otra fecha** para responder con `día 20`, `20/07` o una fecha escrita.
+- **Buscar producto**, que solicita una respuesta como `latte ayer` o
+  `mini pancakes día 20`.
+- **Ayuda** para ver ejemplos.
+
+El comando `/menu` recupera los botones principales en cualquier momento.
 
 ## Seguridad y operación
 

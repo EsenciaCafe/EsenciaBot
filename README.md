@@ -3,6 +3,9 @@
 Bot privado de Telegram para consultar las ventas de Esencia y auditar los pedidos
 vaciados desde el TPV.
 
+Incluye un menú guiado con botones de periodo, búsqueda de productos y acciones
+reversibles sobre los vaciados.
+
 ## Arquitectura
 
 - La Edge Function `telegram-sales-bot` se despliega en el proyecto Supabase del TPV.
