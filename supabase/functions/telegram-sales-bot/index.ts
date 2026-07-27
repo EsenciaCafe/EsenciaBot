@@ -274,12 +274,13 @@ async function auditRest(
   return await response.json();
 }
 
-async function loadVoidOrders(period: Period) {
+async function loadVoidOrders(period: Period, countedOnly = true) {
   const { from, to } = periodDateRange(period);
   return await auditRest('voided_orders', {
-    select: 'event_id,total_amount,item_units,business_date',
+    select: 'event_id,total_amount,item_units,business_date,counts_in_statistics',
     business_date: from === to ? `eq.${from}` : `gte.${from}`,
     ...(from === to ? {} : { and: `(business_date.lte.${to})` }),
+    ...(countedOnly ? { counts_in_statistics: 'eq.true' } : {}),
     order: 'occurred_at.desc',
     limit: '5000'
   }) as JsonRecord[];
@@ -306,6 +307,32 @@ async function recordVoidEvent(event: JsonRecord) {
     method: 'POST',
     body: JSON.stringify({ p_event: event })
   }) as JsonRecord;
+}
+
+export async function setVoidStatisticsStatus(
+  eventId: string,
+  countsInStatistics: boolean,
+  actor: string
+) {
+  if (!/^EMPTY-[A-Za-z0-9-]{8,80}$/.test(eventId)) {
+    throw new Error('Identificador de vaciado no válido.');
+  }
+  const rows = await auditRest('voided_orders', {
+    select: 'event_id,counts_in_statistics',
+    event_id: `eq.${eventId}`
+  }, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({
+      counts_in_statistics: countsInStatistics,
+      statistics_excluded_at: countsInStatistics ? null : new Date().toISOString(),
+      statistics_excluded_by: countsInStatistics ? null : actor.slice(0, 80)
+    })
+  }) as JsonRecord[];
+  if (!Array.isArray(rows) || rows.length !== 1) {
+    throw new Error('No se encontró el vaciado.');
+  }
+  return rows[0];
 }
 
 async function loadSales(period: Period) {
@@ -661,8 +688,23 @@ async function answer(chatId: number, text: string) {
   });
 }
 
-async function voidsMessage(period: Period) {
-  const orders = await loadVoidOrders(period);
+export function voidStatisticsKeyboard(eventId: string, countsInStatistics: boolean) {
+  const callbackData = `vs:${countsInStatistics ? '0' : '1'}:${eventId}`;
+  if (new TextEncoder().encode(callbackData).length > 64) return { inline_keyboard: [] };
+  return {
+    inline_keyboard: [[{
+      text: countsInStatistics
+        ? '🚫 No contar en estadísticas'
+        : '↩️ Volver a contar',
+      callback_data: callbackData
+    }]]
+  };
+}
+
+export async function voidsMessage(period: Period) {
+  const allOrders = await loadVoidOrders(period, false);
+  const orders = allOrders.filter(order => order.counts_in_statistics !== false);
+  const excluded = allOrders.length - orders.length;
   const totals = orders.reduce((result, order) => {
     result.amount += Number(order.total_amount || 0);
     result.units += Number(order.item_units || 0);
@@ -673,8 +715,9 @@ async function voidsMessage(period: Period) {
     '',
     `Vaciados: <b>${orders.length}</b>`,
     `Importe: <b>${money(totals.amount)}</b>`,
-    `Artículos: <b>${totals.units.toLocaleString('es-ES')}</b>`
-  ].join('\n');
+    `Artículos: <b>${totals.units.toLocaleString('es-ES')}</b>`,
+    excluded ? `No contabilizados: <b>${excluded}</b>` : ''
+  ].filter(Boolean).join('\n');
 }
 
 async function isTpvInvocation(request: Request) {
@@ -779,7 +822,8 @@ async function handleTicketCleared(body: JsonRecord) {
           '',
           ...itemLines
         ].filter(Boolean).join('\n'),
-        parse_mode: 'HTML'
+        parse_mode: 'HTML',
+        reply_markup: voidStatisticsKeyboard(eventId, true)
       }) as JsonRecord;
       notificationMessageIds.push({
         chatId,
@@ -834,20 +878,55 @@ Deno.serve(async request => {
     const chatId = Number(chat?.id || 0);
     const isCallback = Boolean(callback?.id);
 
-    if (callback?.id) {
-      await telegram('answerCallbackQuery', { callback_query_id: callback.id });
-    }
     if (!chatId || !userId) return jsonResponse({ ok: true });
     if (!isCallback && (from?.is_bot === true || !message?.text)) {
       return jsonResponse({ ok: true });
     }
     if (!TELEGRAM_ALLOWED_USER_IDS.has(userId)) {
       console.warn(`[telegram-sales-bot] Usuario no autorizado: ${userId}`);
-      await answer(chatId, '⛔ Este usuario no está autorizado para consultar el TPV.');
+      if (callback?.id) {
+        await telegram('answerCallbackQuery', {
+          callback_query_id: callback.id,
+          text: 'Usuario no autorizado.',
+          show_alert: true
+        });
+      } else {
+        await answer(chatId, '⛔ Este usuario no está autorizado para consultar el TPV.');
+      }
       return jsonResponse({ ok: true });
     }
 
     const text = String(callback?.data || message?.text || '');
+    const voidStatus = text.match(/^vs:([01]):(EMPTY-[A-Za-z0-9-]{8,80})$/);
+    if (callback?.id && voidStatus) {
+      const countsInStatistics = voidStatus[1] === '1';
+      try {
+        await setVoidStatisticsStatus(voidStatus[2], countsInStatistics, userId);
+        await telegram('answerCallbackQuery', {
+          callback_query_id: callback.id,
+          text: countsInStatistics
+            ? 'Este vaciado vuelve a contar.'
+            : 'Vaciado excluido de las estadísticas.'
+        });
+        await telegram('editMessageReplyMarkup', {
+          chat_id: chatId,
+          message_id: Number(message?.message_id || 0),
+          reply_markup: voidStatisticsKeyboard(voidStatus[2], countsInStatistics)
+        });
+      } catch (error) {
+        console.error('[telegram-sales-bot] No se pudo cambiar el estado estadístico', error);
+        await telegram('answerCallbackQuery', {
+          callback_query_id: callback.id,
+          text: 'No se pudo cambiar. Inténtalo de nuevo.',
+          show_alert: true
+        });
+      }
+      return jsonResponse({ ok: true });
+    }
+    if (callback?.id) {
+      await telegram('answerCallbackQuery', { callback_query_id: callback.id });
+    }
+
     const intent = intentFor(text);
     const period = periodFor(text);
     let reply = '';

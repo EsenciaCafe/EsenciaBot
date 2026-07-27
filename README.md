@@ -8,6 +8,7 @@ vaciados desde el TPV.
 - La Edge Function `telegram-sales-bot` se despliega en el proyecto Supabase del TPV.
 - Las ventas cobradas se consultan en modo lectura desde la base del TPV.
 - Los vaciados se guardan en un proyecto Supabase de auditoría independiente.
+- Los vaciados de prueba pueden excluirse de las estadísticas desde Telegram sin borrarlos.
 - El navegador nunca recibe la clave secreta del proyecto de auditoría.
 - El repositorio `EsenciaTPV` solo conserva el cliente que notifica cada vaciado.
 

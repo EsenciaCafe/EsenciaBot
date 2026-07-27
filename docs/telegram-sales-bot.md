@@ -16,6 +16,7 @@ incluidos en `TELEGRAM_ALLOWED_USER_IDS`.
 - Botones rápidos y preguntas sencillas en lenguaje natural.
 - Aviso inmediato cuando se vacía una mesa, comanda o venta directa.
 - Resumen de pedidos vaciados por día desde una base de auditoría independiente.
+- Exclusión reversible de vaciados de prueba mediante un botón privado en Telegram.
 
 ## 1. Crear el bot y conocer el ID autorizado
 
@@ -115,3 +116,15 @@ vaciadas de auditoría, mostrando ambos importes y el total.
 
 El TPV espera a que el registro de auditoría se complete antes de borrar el pedido.
 Si falla, muestra un error y conserva todos los artículos.
+
+### Vaciados de prueba
+
+Cada aviso de vaciado incluye el botón **No contar en estadísticas**. Al pulsarlo:
+
+- El registro permanece guardado en la base de auditoría.
+- Sus artículos e importe dejan de participar en consultas, top y totales.
+- `/vaciados` lo muestra únicamente dentro de `No contabilizados`.
+- El botón cambia a **Volver a contar** para poder deshacer la exclusión.
+
+Este control solo aparece en el chat privado autorizado de Telegram y no añade
+ningún mensaje ni indicador nuevo en el TPV.
