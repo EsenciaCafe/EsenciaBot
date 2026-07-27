@@ -10,7 +10,7 @@ incluidos en `TELEGRAM_ALLOWED_USER_IDS`.
 - Resumen de hoy, ayer o el mes actual.
 - Total neto, tickets, ticket medio y devoluciones.
 - Desglose de cobros en efectivo, tarjeta y tarjeta regalo.
-- Diez artículos más vendidos.
+- Diez artículos con más unidades registradas, sumando ventas cobradas y vaciados.
 - Búsqueda por artículo con ventas cobradas, vaciados y total combinado.
 - Botones rápidos y preguntas sencillas en lenguaje natural.
 - Aviso inmediato cuando se vacía una mesa, comanda o venta directa.
@@ -82,6 +82,10 @@ Comprueba el resultado con `getWebhookInfo` y escribe `/start` al bot.
 ¿Cuántos cafés se vendieron ayer?
 ¿Cuánto hemos vendido hoy?
 ```
+
+El ranking `/top` muestra el total combinado y el desglose de cada artículo. Por
+ejemplo, 5 latte cobrados y 3 latte vaciados aparecen como 8 unidades:
+`5 vendidas + 3 vaciadas`.
 
 ## Seguridad y operación
 

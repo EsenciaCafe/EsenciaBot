@@ -375,14 +375,71 @@ function voidProductRows(lines: JsonRecord[]) {
   return [...grouped.values()].sort((a, b) => b.quantity - a.quantity);
 }
 
-function topMessage(period: Period, sales: JsonRecord[], lines: JsonRecord[]) {
-  const rows = productRows(sales, lines).filter(row => row.quantity !== 0).slice(0, 10);
-  if (!rows.length) return `No hay artículos vendidos ${periodLabel(period)}.`;
+export function combinedProductRows(
+  sales: JsonRecord[],
+  lines: JsonRecord[],
+  voidLines: JsonRecord[]
+) {
+  const grouped = new Map<string, {
+    name: string;
+    soldQuantity: number;
+    soldTotal: number;
+    voidQuantity: number;
+    voidTotal: number;
+    quantity: number;
+    total: number;
+  }>();
+
+  productRows(sales, lines).forEach(row => {
+    const key = normalize(row.name);
+    grouped.set(key, {
+      name: row.name,
+      soldQuantity: row.quantity,
+      soldTotal: row.total,
+      voidQuantity: 0,
+      voidTotal: 0,
+      quantity: row.quantity,
+      total: row.total
+    });
+  });
+
+  voidProductRows(voidLines).forEach(row => {
+    const key = normalize(row.name);
+    const current = grouped.get(key) || {
+      name: row.name,
+      soldQuantity: 0,
+      soldTotal: 0,
+      voidQuantity: 0,
+      voidTotal: 0,
+      quantity: 0,
+      total: 0
+    };
+    current.voidQuantity += row.quantity;
+    current.voidTotal += row.total;
+    current.quantity += row.quantity;
+    current.total += row.total;
+    grouped.set(key, current);
+  });
+
+  return [...grouped.values()].sort((a, b) => b.quantity - a.quantity);
+}
+
+export function topMessage(
+  period: Period,
+  sales: JsonRecord[],
+  lines: JsonRecord[],
+  voidLines: JsonRecord[]
+) {
+  const rows = combinedProductRows(sales, lines, voidLines)
+    .filter(row => row.quantity > 0)
+    .slice(0, 10);
+  if (!rows.length) return `No hay artículos vendidos ni vaciados ${periodLabel(period)}.`;
   return [
-    `🏆 <b>Artículos más vendidos ${periodLabel(period)}</b>`,
+    `🏆 <b>Top de artículos ${periodLabel(period)}</b>`,
     '',
     ...rows.map((row, index) =>
-      `${index + 1}. <b>${escapeHtml(row.name)}</b> — ${row.quantity.toLocaleString('es-ES')} uds. · ${money(row.total)}`
+      `${index + 1}. <b>${escapeHtml(row.name)}</b> — <b>${row.quantity.toLocaleString('es-ES')} uds.</b> · ${money(row.total)}` +
+      ` (${row.soldQuantity.toLocaleString('es-ES')} vendidas + ${row.voidQuantity.toLocaleString('es-ES')} vaciadas)`
     )
   ].join('\n');
 }
@@ -703,7 +760,9 @@ Deno.serve(async request => {
     } else {
       const { sales, lines, payments } = await loadDetails(period);
       if (intent === 'cash') reply = cashMessage(period, sales, payments);
-      if (intent === 'top') reply = topMessage(period, sales, lines);
+      if (intent === 'top') {
+        reply = topMessage(period, sales, lines, await loadVoidLines(period));
+      }
       if (intent === 'product') {
         const query = inferProductQuery(text);
         reply = query
