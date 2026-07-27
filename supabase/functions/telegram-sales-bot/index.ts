@@ -801,6 +801,132 @@ export async function voidsMessage(period: Period) {
   ].filter(Boolean).join('\n');
 }
 
+export function cashClosureMessage(
+  closure: JsonRecord,
+  sales: JsonRecord[],
+  lines: JsonRecord[],
+  payments: JsonRecord[],
+  allVoidOrders: JsonRecord[],
+  voidLines: JsonRecord[]
+) {
+  const businessDate = String(closure.businessDate || '');
+  const period = `date:${businessDate}` as Period;
+  const salesSummary = summarize(sales, payments);
+  const countedVoids = allVoidOrders.filter(order => order.counts_in_statistics !== false);
+  const excludedVoids = allVoidOrders.length - countedVoids.length;
+  const voidTotals = countedVoids.reduce((result, order) => {
+    result.amount += Number(order.total_amount || 0);
+    result.units += Number(order.item_units || 0);
+    return result;
+  }, { amount: 0, units: 0 });
+  const top = combinedProductRows(sales, lines, voidLines)
+    .filter(row => row.quantity > 0)
+    .slice(0, 5);
+  const closedAt = String(closure.closedAt || '');
+  const staffName = String(closure.staffName || '').slice(0, 80);
+  const notes = String(closure.notes || '').trim().slice(0, 300);
+
+  return [
+    '🔒 <b>Cierre de caja realizado</b>',
+    '',
+    `<b>${periodLabel(period)}</b> · Turno ${Number(closure.shiftNumber || 1)}`,
+    staffName ? `Responsable: ${escapeHtml(staffName)}` : '',
+    closedAt ? `Hora: ${new Intl.DateTimeFormat('es-ES', {
+      timeZone: BUSINESS_TIME_ZONE,
+      dateStyle: 'short',
+      timeStyle: 'short'
+    }).format(new Date(closedAt))}` : '',
+    '',
+    '📊 <b>Ventas del día</b>',
+    `Neto: <b>${money(salesSummary.net)}</b>`,
+    `Tickets: <b>${salesSummary.tickets}</b> · Ticket medio: <b>${money(salesSummary.average)}</b>`,
+    salesSummary.refunds
+      ? `Bruto: ${money(salesSummary.gross)} · Devoluciones: ${money(salesSummary.refunds)}`
+      : '',
+    `Efectivo: ${money(salesSummary.payments.cash)} · Tarjeta: ${money(salesSummary.payments.card)}`,
+    salesSummary.payments.gift ? `Tarjeta regalo: ${money(salesSummary.payments.gift)}` : '',
+    '',
+    '🗑️ <b>Vaciados contabilizados</b>',
+    `Pedidos: <b>${countedVoids.length}</b> · Artículos: <b>${voidTotals.units.toLocaleString('es-ES')}</b>`,
+    `Importe: <b>${money(voidTotals.amount)}</b>`,
+    excludedVoids ? `No contabilizados: <b>${excludedVoids}</b>` : '',
+    top.length ? '🏆 <b>Top del día</b>' : '',
+    ...top.map((row, index) =>
+      `${index + 1}. ${escapeHtml(row.name)} — ${row.quantity.toLocaleString('es-ES')} uds.` +
+      ` (${row.soldQuantity.toLocaleString('es-ES')} vendidas + ${row.voidQuantity.toLocaleString('es-ES')} vaciadas)`
+    ),
+    '',
+    '💰 <b>Arqueo del turno cerrado</b>',
+    `Efectivo contado: <b>${money(Number(closure.countedCash || 0))}</b>`,
+    `Diferencia efectivo: <b>${money(Number(closure.cashDifference || 0))}</b>`,
+    `Cierre BBVA: <b>${money(Number(closure.bbvaTotal || 0))}</b>`,
+    `Diferencia BBVA: <b>${money(Number(closure.cardDifference || 0))}</b>`,
+    notes ? `Notas: ${escapeHtml(notes)}` : ''
+  ].filter(line => line !== '').join('\n');
+}
+
+async function handleCashClosed(body: JsonRecord) {
+  const closureId = String(body.closureId || '');
+  const businessDate = String(body.businessDate || '');
+  const shiftNumber = Number(body.shiftNumber || 0);
+  const [year, month, day] = businessDate.split('-').map(Number);
+
+  if (
+    !/^closure-[A-Za-z0-9-]{8,100}$/.test(closureId) ||
+    dateKeyFor(year, month, day) !== businessDate ||
+    !Number.isInteger(shiftNumber) || shiftNumber < 1 || shiftNumber > 99
+  ) {
+    return jsonResponse({ ok: false, error: 'Evento de cierre no válido.' }, 400);
+  }
+
+  const closureRows = await rest('cash_closures', {
+    select: 'id,business_date,shift_number,counted_cash,cash_difference,bbva_total,card_difference,staff_name,notes,closed_at',
+    id: `eq.${closureId}`,
+    business_date: `eq.${businessDate}`,
+    shift_number: `eq.${shiftNumber}`,
+    limit: '1'
+  });
+  if (closureRows.length !== 1) {
+    return jsonResponse({ ok: false, error: 'El cierre no existe en el TPV.' }, 404);
+  }
+  const row = closureRows[0];
+  const closure = {
+    businessDate: row.business_date,
+    shiftNumber: row.shift_number,
+    closedAt: row.closed_at,
+    staffName: row.staff_name,
+    countedCash: row.counted_cash,
+    cashDifference: row.cash_difference,
+    bbvaTotal: row.bbva_total,
+    cardDifference: row.card_difference,
+    notes: row.notes
+  };
+  const period = `date:${businessDate}` as Period;
+  const [{ sales, lines, payments }, allVoidOrders, voidLines] = await Promise.all([
+    loadDetails(period),
+    loadVoidOrders(period, false),
+    loadVoidLines(period)
+  ]);
+  const text = cashClosureMessage(closure, sales, lines, payments, allVoidOrders, voidLines);
+  const notificationMessageIds: Array<{ chatId: number; messageId: number }> = [];
+
+  for (const userId of TELEGRAM_ALLOWED_USER_IDS) {
+    const chatId = Number(userId);
+    if (!chatId) continue;
+    const notification = await telegram('sendMessage', {
+      chat_id: chatId,
+      text,
+      parse_mode: 'HTML',
+      reply_markup: mainKeyboard
+    }) as JsonRecord;
+    notificationMessageIds.push({
+      chatId,
+      messageId: Number(notification.message_id || 0)
+    });
+  }
+  return jsonResponse({ ok: true, notificationMessageIds });
+}
+
 async function isTpvInvocation(request: Request) {
   const authorization = request.headers.get('authorization') || '';
   const apiKey = request.headers.get('apikey') || '';
@@ -941,6 +1067,16 @@ Deno.serve(async request => {
     } catch (error) {
       console.error('[telegram-sales-bot] No se pudo registrar o notificar el vaciado', error);
       return jsonResponse({ ok: false, error: 'No se pudo registrar el vaciado.' }, 502);
+    }
+  }
+
+  if (body.type === 'cash_closed') {
+    if (!await isTpvInvocation(request)) return jsonResponse({ error: 'Acceso no autorizado.' }, 401);
+    try {
+      return await handleCashClosed(body);
+    } catch (error) {
+      console.error('[telegram-sales-bot] No se pudo enviar el resumen del cierre', error);
+      return jsonResponse({ ok: false, error: 'No se pudo enviar el resumen del cierre.' }, 502);
     }
   }
 

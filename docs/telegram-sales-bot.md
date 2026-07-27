@@ -17,6 +17,8 @@ incluidos en `TELEGRAM_ALLOWED_USER_IDS`.
 - Selectores de periodo para evitar escribir comandos manualmente.
 - Búsqueda guiada de productos y fechas mediante respuestas de Telegram.
 - Aviso inmediato cuando se vacía una mesa, comanda o venta directa.
+- Aviso automático al cerrar caja con ventas del día, cobros, top de productos,
+  vaciados y diferencias del arqueo cerrado.
 - Resumen de pedidos vaciados por día desde una base de auditoría independiente.
 - Exclusión reversible de vaciados de prueba mediante un botón privado en Telegram.
 
@@ -118,6 +120,16 @@ El comando `/menu` recupera los botones principales en cualquier momento.
 - Mantén reducida la lista de usuarios autorizados.
 - La función no modifica ventas, cierres ni inventario.
 - Los accesos rechazados quedan registrados sin almacenar el contenido del mensaje.
+
+## Aviso de cierre de caja
+
+Después de guardar un cierre, el TPV envía un evento privado al bot. El bot consulta
+las ventas definitivas de la fecha comercial y los vaciados contabilizados en la base
+de auditoría, y envía un resumen a cada usuario autorizado.
+
+El resumen incluye neto, tickets, ticket medio, efectivo, tarjeta, vaciados, top
+combinado de productos y diferencias del arqueo. Un fallo puntual de Telegram no
+anula ni bloquea el cierre ya guardado en el TPV.
 
 ## Registro de pedidos vaciados
 
