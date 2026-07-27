@@ -18,7 +18,23 @@ const BUSINESS_TIME_ZONE = 'Atlantic/Canary';
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
 
 type JsonRecord = Record<string, unknown>;
-type Period = 'today' | 'yesterday' | 'month';
+type Period = 'today' | 'yesterday' | 'month' | `date:${string}`;
+
+const MONTH_NUMBERS: Record<string, number> = {
+  enero: 1,
+  febrero: 2,
+  marzo: 3,
+  abril: 4,
+  mayo: 5,
+  junio: 6,
+  julio: 7,
+  agosto: 8,
+  septiembre: 9,
+  setiembre: 9,
+  octubre: 10,
+  noviembre: 11,
+  diciembre: 12
+};
 
 const quickKeyboard = {
   inline_keyboard: [
@@ -80,9 +96,71 @@ function shiftDateKey(dateKey: string, days: number) {
   return shifted.toISOString().slice(0, 10);
 }
 
-function periodFor(text: string): Period {
+function dateKeyFor(year: number, month: number, day: number) {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return '';
+  const candidate = new Date(Date.UTC(year, month - 1, day, 12));
+  if (
+    candidate.getUTCFullYear() !== year ||
+    candidate.getUTCMonth() !== month - 1 ||
+    candidate.getUTCDate() !== day
+  ) return '';
+  return [
+    String(year).padStart(4, '0'),
+    String(month).padStart(2, '0'),
+    String(day).padStart(2, '0')
+  ].join('-');
+}
+
+export function explicitDatePeriod(text: string, now: Date = new Date()): Period | null {
+  const normalized = normalize(text);
+  const todayParts = localParts(now);
+  const currentYear = Number(todayParts.year);
+  const currentMonth = Number(todayParts.month);
+
+  const numeric = normalized.match(/\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/);
+  if (numeric) {
+    const yearNumber = numeric[3]
+      ? Number(numeric[3].length === 2 ? `20${numeric[3]}` : numeric[3])
+      : currentYear;
+    const key = dateKeyFor(yearNumber, Number(numeric[2]), Number(numeric[1]));
+    return key ? `date:${key}` : null;
+  }
+
+  const monthNames = Object.keys(MONTH_NUMBERS).join('|');
+  const named = normalized.match(
+    new RegExp(`\\b(\\d{1,2})\\s+de\\s+(${monthNames})(?:\\s+de\\s+(\\d{4}))?\\b`)
+  );
+  if (named) {
+    const key = dateKeyFor(
+      Number(named[3] || currentYear),
+      MONTH_NUMBERS[named[2]],
+      Number(named[1])
+    );
+    return key ? `date:${key}` : null;
+  }
+
+  const dayOnly = normalized.match(/\b(?:el\s+)?dia\s+(\d{1,2})(?:\s+del\s+mes\s+pasado)?\b/);
+  if (dayOnly) {
+    const previousMonth = normalized.includes('mes pasado');
+    const monthAnchor = previousMonth
+      ? new Date(Date.UTC(currentYear, currentMonth - 2, 15))
+      : new Date(Date.UTC(currentYear, currentMonth - 1, 15));
+    const key = dateKeyFor(
+      monthAnchor.getUTCFullYear(),
+      monthAnchor.getUTCMonth() + 1,
+      Number(dayOnly[1])
+    );
+    return key ? `date:${key}` : null;
+  }
+
+  return null;
+}
+
+export function periodFor(text: string): Period {
   const raw = String(text || '').toLowerCase();
   const normalized = normalize(text);
+  const explicit = explicitDatePeriod(text);
+  if (explicit) return explicit;
   if (normalized.includes('ayer') || raw.endsWith(':yesterday')) return 'yesterday';
   if (
     normalized.includes('mes') ||
@@ -92,15 +170,25 @@ function periodFor(text: string): Period {
   return 'today';
 }
 
-function periodLabel(period: Period) {
+export function periodLabel(period: Period) {
+  if (period.startsWith('date:')) {
+    const [year, month, day] = period.slice(5).split('-').map(Number);
+    return `el ${new Intl.DateTimeFormat('es-ES', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'UTC'
+    }).format(new Date(Date.UTC(year, month - 1, day, 12)))}`;
+  }
   if (period === 'yesterday') return 'ayer';
   if (period === 'month') return 'este mes';
   return 'hoy';
 }
 
-function belongsToPeriod(value: string, period: Period) {
+export function belongsToPeriod(value: string, period: Period) {
   const rowKey = localDateKey(value);
   const today = localDateKey(new Date());
+  if (period.startsWith('date:')) return rowKey === period.slice(5);
   if (period === 'yesterday') return rowKey === shiftDateKey(today, -1);
   if (period === 'month') return rowKey.slice(0, 7) === today.slice(0, 7);
   return rowKey === today;
@@ -108,6 +196,10 @@ function belongsToPeriod(value: string, period: Period) {
 
 function periodDateRange(period: Period) {
   const today = localDateKey(new Date());
+  if (period.startsWith('date:')) {
+    const date = period.slice(5);
+    return { from: date, to: date };
+  }
   if (period === 'yesterday') {
     const yesterday = shiftDateKey(today, -1);
     return { from: yesterday, to: yesterday };
@@ -193,7 +285,7 @@ async function loadVoidOrders(period: Period) {
   }) as JsonRecord[];
 }
 
-async function loadVoidLines(period: Period) {
+export async function loadVoidLines(period: Period) {
   const orders = await loadVoidOrders(period);
   const eventIds = orders.map(row => String(row.event_id)).filter(Boolean);
   if (eventIds.length === 0) return [];
@@ -217,11 +309,17 @@ async function recordVoidEvent(event: JsonRecord) {
 }
 
 async function loadSales(period: Period) {
+  const exactDate = period.startsWith('date:') ? period.slice(5) : '';
   const lookbackDays = period === 'month' ? 35 : 3;
-  const since = new Date(Date.now() - lookbackDays * 86400000).toISOString();
+  const since = exactDate
+    ? `${shiftDateKey(exactDate, -1)}T22:00:00.000Z`
+    : new Date(Date.now() - lookbackDays * 86400000).toISOString();
   const rows = await rest('sales', {
     select: 'id,type,total_amount,payment_method,closed_at,created_at,payload',
     closed_at: `gte.${since}`,
+    ...(exactDate
+      ? { and: `(closed_at.lte.${shiftDateKey(exactDate, 1)}T02:00:00.000Z)` }
+      : {}),
     order: 'closed_at.desc',
     limit: '5000'
   });
@@ -232,7 +330,7 @@ async function loadSales(period: Period) {
   });
 }
 
-async function loadDetails(period: Period) {
+export async function loadDetails(period: Period) {
   const sales = await loadSales(period);
   const saleIds = sales.map(row => String(row.id)).filter(Boolean);
   if (saleIds.length === 0) return { sales, lines: [], payments: [] };
@@ -455,7 +553,7 @@ function matchingProducts(
   });
 }
 
-function productMessage(
+export function productMessage(
   query: string,
   period: Period,
   sales: JsonRecord[],
@@ -490,7 +588,8 @@ function helpMessage() {
     '',
     'Puedes preguntarme:',
     '• “¿Cuánto hemos vendido hoy?”',
-    '• “¿Cuántos minipancakes se vendieron?”',
+    '• “¿Cuántos mini pancakes se vendieron el día 20?”',
+    '• “¿Cuántos latte se vendieron el 20/07?”',
     '• “Top de productos este mes”',
     '• “Caja de ayer”',
     '',
@@ -498,15 +597,19 @@ function helpMessage() {
     '/hoy · /ayer · /mes',
     '/caja [hoy|ayer|mes]',
     '/top [hoy|ayer|mes]',
-    '/producto nombre [hoy|ayer|mes]',
+    '/producto nombre [hoy|ayer|mes|fecha]',
     '/vaciados [hoy|ayer|mes]'
   ].join('\n');
 }
 
-function inferProductQuery(originalText: string) {
+export function inferProductQuery(originalText: string) {
+  const monthNames = Object.keys(MONTH_NUMBERS).join('|');
   let text = normalize(originalText)
     .replace(/\b(cuantos|cuantas|cuanto|cuanta|que cantidad de|unidades de)\b/g, ' ')
     .replace(/\b(se vendieron|vendimos|hemos vendido|se han vendido|ventas de|venta de)\b/g, ' ')
+    .replace(/\b(?:el\s+)?dia\s+\d{1,2}(?:\s+del\s+mes\s+pasado)?\b/g, ' ')
+    .replace(/\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b/g, ' ')
+    .replace(new RegExp(`\\b\\d{1,2}\\s+de\\s+(?:${monthNames})(?:\\s+de\\s+\\d{4})?\\b`, 'g'), ' ')
     .replace(/\b(hoy|ayer|este mes|del mes|en el mes)\b/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();

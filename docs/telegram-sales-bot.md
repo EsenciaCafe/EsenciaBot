@@ -12,6 +12,7 @@ incluidos en `TELEGRAM_ALLOWED_USER_IDS`.
 - Desglose de cobros en efectivo, tarjeta y tarjeta regalo.
 - Diez artículos con más unidades registradas, sumando ventas cobradas y vaciados.
 - Búsqueda por artículo con ventas cobradas, vaciados y total combinado.
+- Consultas de fechas concretas: `día 20`, `20/07/2026` o `20 de julio`.
 - Botones rápidos y preguntas sencillas en lenguaje natural.
 - Aviso inmediato cuando se vacía una mesa, comanda o venta directa.
 - Resumen de pedidos vaciados por día desde una base de auditoría independiente.
@@ -77,11 +78,17 @@ Comprueba el resultado con `getWebhookInfo` y escribe `/start` al bot.
 /caja hoy
 /top este mes
 /producto minipancakes
+/producto mini pancakes día 20
 /vaciados hoy
 ¿Cuántas mesas se vaciaron ayer y por qué importe?
 ¿Cuántos cafés se vendieron ayer?
+¿Cuántos mini pancakes se vendieron el día 20?
 ¿Cuánto hemos vendido hoy?
 ```
+
+Cuando se indica solo `día 20`, el bot consulta el día 20 del mes actual. Para
+evitar ambigüedades también se puede indicar `día 20 del mes pasado`, `20/07` o
+`20 de julio de 2026`. La respuesta siempre muestra la fecha interpretada.
 
 El ranking `/top` muestra el total combinado y el desglose de cada artículo. Por
 ejemplo, 5 latte cobrados y 3 latte vaciados aparecen como 8 unidades:
