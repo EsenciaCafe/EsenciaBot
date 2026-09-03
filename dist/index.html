@@ -168,6 +168,62 @@
           </div>
           <button id="load-more" class="secondary-button" type="button" hidden>Ver anteriores</button>
         </section>
+
+        <section id="modifiers-view" class="view" aria-labelledby="modifiers-title" hidden>
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">TENDENCIAS</p>
+              <h2 id="modifiers-title">Modificadores</h2>
+            </div>
+            <button class="icon-button" id="refresh-modifiers" type="button" aria-label="Actualizar modificadores">↻</button>
+          </div>
+
+          <div class="chip-row" role="group" aria-label="Intervalo de modificadores">
+            <button class="chip" type="button" data-modifier-range="today">Hoy</button>
+            <button class="chip" type="button" data-modifier-range="week">7 días</button>
+            <button class="chip is-active" type="button" data-modifier-range="month">Este mes</button>
+            <button class="chip" type="button" data-modifier-range="year">12 meses</button>
+          </div>
+
+          <form id="modifier-date-filter" class="date-filter">
+            <label>Desde<input id="modifier-date-from" type="date" required></label>
+            <label>Hasta<input id="modifier-date-to" type="date" required></label>
+            <button type="submit">Aplicar</button>
+          </form>
+
+          <div id="modifiers-error" class="inline-error" hidden></div>
+          <div id="modifiers-loading" class="history-loading" hidden><span></span><span></span><span></span></div>
+
+          <div id="modifiers-content" hidden>
+            <label class="product-picker">
+              Producto
+              <select id="modifier-product"></select>
+            </label>
+
+            <article class="surface modifier-surface">
+              <div class="surface-title-row">
+                <div>
+                  <p class="eyebrow">VENTAS</p>
+                  <h3 id="modifier-product-name">Producto</h3>
+                </div>
+                <span id="modifier-product-units" class="surface-total">—</span>
+              </div>
+              <div class="history-summary modifier-summary">
+                <div><span>Anterior</span><strong id="modifier-previous-units">—</strong></div>
+                <div><span>Variación</span><strong id="modifier-product-trend">—</strong></div>
+                <div><span>Opciones</span><strong id="modifier-count">—</strong></div>
+              </div>
+              <p id="modifier-comparison-label" class="comparison-label"></p>
+              <ol id="modifier-list" class="ranking-list modifier-list"></ol>
+            </article>
+          </div>
+
+          <div id="modifiers-empty" class="empty-state" hidden>
+            <div aria-hidden="true">—</div>
+            <h3>Sin modificadores</h3>
+            <p>No hay productos con modificadores registrados en este intervalo ni en el anterior.</p>
+          </div>
+        </section>
       </main>
 
       <nav class="bottom-nav" aria-label="Secciones del panel">
@@ -178,6 +234,10 @@
         <button class="is-active" type="button" data-view="history-view">
           <span aria-hidden="true">◷</span>
           Vaciados
+        </button>
+        <button type="button" data-view="modifiers-view">
+          <span aria-hidden="true">≋</span>
+          Modificadores
         </button>
       </nav>
     </div>

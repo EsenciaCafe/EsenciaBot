@@ -750,6 +750,158 @@ export function summarizePancakeToppings(sales: JsonRecord[], lines: JsonRecord[
   };
 }
 
+function canonicalModifierName(rawName: string, productName: string) {
+  const value = normalize(rawName);
+  const isPancake = normalize(productName).includes('pancake');
+  if (['plane', 'plain', 'sin topping', 'sin toppings', 'sin modificador'].includes(value)) {
+    return isPancake ? 'Sin Topping' : 'Sin modificador';
+  }
+  const aliases: Record<string, string> = {
+    frio: 'Frío',
+    'sin nata': 'Sin Nata',
+    'leche avena': 'Leche de Avena',
+    'leche de avena': 'Leche de Avena',
+    caloente: 'Caliente',
+    caliente: 'Caliente'
+  };
+  return aliases[value] || String(rawName || 'Modificador').trim();
+}
+
+type ModifierAggregate = {
+  key: string;
+  name: string;
+  units: number;
+  amount: number;
+};
+
+type ProductModifierAggregate = {
+  key: string;
+  name: string;
+  units: number;
+  hasObservedModifiers: boolean;
+  modifiers: Map<string, ModifierAggregate>;
+};
+
+export function aggregateProductModifiers(sales: JsonRecord[], lines: JsonRecord[]) {
+  const completedSaleIds = new Set(
+    sales
+      .filter(row => String(row.type || 'sale') !== 'refund')
+      .map(row => String(row.id))
+  );
+  const products = new Map<string, ProductModifierAggregate>();
+
+  lines.forEach(line => {
+    if (!completedSaleIds.has(String(line.sale_id))) return;
+    const productName = String(line.name || 'Artículo').trim();
+    const productKey = normalize(productName);
+    const lineQuantity = Math.max(0, Number(line.quantity || 0));
+    const product = products.get(productKey) || {
+      key: productKey,
+      name: productName,
+      units: 0,
+      hasObservedModifiers: false,
+      modifiers: new Map<string, ModifierAggregate>()
+    };
+    product.units += lineQuantity;
+    const selectedOptions = Array.isArray(line.selected_options)
+      ? line.selected_options as JsonRecord[]
+      : [];
+    if (selectedOptions.length > 0) product.hasObservedModifiers = true;
+    const options = selectedOptions.length > 0
+      ? selectedOptions
+      : [{ name: normalize(productName).includes('pancake') ? 'Sin Topping' : 'Sin modificador', qty: 1, price: 0 }];
+
+    options.forEach(option => {
+      const modifierName = canonicalModifierName(String(option.name || ''), productName);
+      const modifierKey = normalize(modifierName);
+      const optionQuantity = Math.max(0, Number(option.qty ?? option.quantity ?? 1));
+      const units = lineQuantity * optionQuantity;
+      const modifier = product.modifiers.get(modifierKey) || {
+        key: modifierKey,
+        name: modifierName,
+        units: 0,
+        amount: 0
+      };
+      modifier.units += units;
+      modifier.amount += units * Math.max(0, Number(option.price || 0));
+      product.modifiers.set(modifierKey, modifier);
+    });
+    products.set(productKey, product);
+  });
+
+  return products;
+}
+
+function percentageChange(current: number, previous: number) {
+  if (previous === 0) return current > 0 ? null : 0;
+  return round((current - previous) / previous * 100);
+}
+
+export function compareProductModifiers(
+  current: Map<string, ProductModifierAggregate>,
+  previous: Map<string, ProductModifierAggregate>
+) {
+  const productKeys = new Set([...current.keys(), ...previous.keys()]);
+  return [...productKeys]
+    .filter(key => current.get(key)?.hasObservedModifiers || previous.get(key)?.hasObservedModifiers)
+    .map(key => {
+      const currentProduct = current.get(key);
+      const previousProduct = previous.get(key);
+      const currentUnits = currentProduct?.units || 0;
+      const previousUnits = previousProduct?.units || 0;
+      const modifierKeys = new Set([
+        ...(currentProduct?.modifiers.keys() || []),
+        ...(previousProduct?.modifiers.keys() || [])
+      ]);
+      const modifiers = [...modifierKeys].map(modifierKey => {
+        const currentModifier = currentProduct?.modifiers.get(modifierKey);
+        const previousModifier = previousProduct?.modifiers.get(modifierKey);
+        const units = currentModifier?.units || 0;
+        const previousModifierUnits = previousModifier?.units || 0;
+        return {
+          key: modifierKey,
+          name: currentModifier?.name || previousModifier?.name || 'Modificador',
+          units: Number(units.toFixed(3)),
+          previousUnits: Number(previousModifierUnits.toFixed(3)),
+          percentage: currentUnits ? round(units / currentUnits * 100) : 0,
+          trendPercentage: percentageChange(units, previousModifierUnits),
+          amount: round(currentModifier?.amount || 0)
+        };
+      }).sort((left, right) => right.units - left.units || left.name.localeCompare(right.name, 'es'));
+      return {
+        key,
+        name: currentProduct?.name || previousProduct?.name || 'Artículo',
+        units: Number(currentUnits.toFixed(3)),
+        previousUnits: Number(previousUnits.toFixed(3)),
+        trendPercentage: percentageChange(currentUnits, previousUnits),
+        modifiers
+      };
+    })
+    .sort((left, right) => right.units - left.units || left.name.localeCompare(right.name, 'es'));
+}
+
+export async function loadModifierAnalysis(rawFrom?: unknown, rawTo?: unknown) {
+  const { from, to } = validatedDateRange(rawFrom, rawTo);
+  const days = Math.floor(
+    (Date.parse(`${to}T12:00:00Z`) - Date.parse(`${from}T12:00:00Z`)) / 86400000
+  ) + 1;
+  const previousTo = shiftDateKey(from, -1);
+  const previousFrom = shiftDateKey(previousTo, -(days - 1));
+  const [currentDetails, previousDetails] = await Promise.all([
+    loadDetails(`range:${from}:${to}`),
+    loadDetails(`range:${previousFrom}:${previousTo}`)
+  ]);
+  const current = aggregateProductModifiers(currentDetails.sales, currentDetails.lines);
+  const previous = aggregateProductModifiers(previousDetails.sales, previousDetails.lines);
+  return {
+    from,
+    to,
+    previousFrom,
+    previousTo,
+    products: compareProductModifiers(current, previous)
+  };
+}
+
 export function webPeriod(value: unknown, rawFrom?: unknown, rawTo?: unknown): Period {
   const period = String(value || 'today');
   if (period === 'range') {
@@ -830,6 +982,12 @@ async function handleWebApp(body: JsonRecord) {
       return jsonResponse({
         ok: true,
         data: await loadVoidHistory(body.from, body.to, body.page)
+      });
+    }
+    if (action === 'modifier_analysis') {
+      return jsonResponse({
+        ok: true,
+        data: await loadModifierAnalysis(body.from, body.to)
       });
     }
     return jsonResponse({ ok: false, error: 'Acción no reconocida.' }, 400);

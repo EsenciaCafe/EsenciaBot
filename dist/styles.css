@@ -688,7 +688,7 @@ h3 {
   bottom: 0;
   left: 0;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   width: min(100%, 760px);
   margin: 0 auto;
   border-top: 1px solid var(--line);
@@ -696,6 +696,53 @@ h3 {
   background: color-mix(in srgb, var(--surface) 92%, transparent);
   backdrop-filter: blur(18px);
 }
+
+.product-picker {
+  display: block;
+  margin-bottom: 1rem;
+  color: var(--muted);
+  font-size: 0.73rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.product-picker select {
+  width: 100%;
+  min-height: 3rem;
+  margin-top: 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 0.85rem;
+  padding: 0.65rem 0.8rem;
+  color: var(--ink);
+  background: var(--surface);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.modifier-surface .history-summary {
+  margin: 0.25rem 0 0;
+}
+
+.comparison-label {
+  margin: 0 0 0.7rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-align: center;
+}
+
+.modifier-trend {
+  margin-top: 0.15rem;
+  font-weight: 700 !important;
+}
+
+.modifier-trend.is-up { color: #3f8665; }
+.modifier-trend.is-down { color: #b65a45; }
+.modifier-trend.is-flat { color: var(--muted); }
+
+.trend-value.is-up { color: #3f8665; }
+.trend-value.is-down { color: #b65a45; }
+.trend-value.is-flat { color: var(--ink); }
 
 .bottom-nav button {
   min-height: 3.25rem;

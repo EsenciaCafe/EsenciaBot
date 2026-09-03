@@ -29,6 +29,12 @@
     minute: '2-digit',
     timeZone: 'Atlantic/Canary'
   });
+  const calendarDate = new Intl.DateTimeFormat('es-ES', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC'
+  });
 
   const state = {
     summaryPeriod: 'today',
@@ -42,7 +48,13 @@
     summaryLoading: false,
     historyLoading: false,
     toppingsExpanded: false,
-    toppingsData: null
+    toppingsData: null,
+    modifiersFrom: '',
+    modifiersTo: '',
+    modifiersLoading: false,
+    modifiersLoaded: false,
+    modifiersData: null,
+    selectedModifierProduct: ''
   };
 
   const elements = {
@@ -52,11 +64,19 @@
     app: document.getElementById('app'),
     summaryView: document.getElementById('summary-view'),
     historyView: document.getElementById('history-view'),
+    modifiersView: document.getElementById('modifiers-view'),
     summaryError: document.getElementById('summary-error'),
     historyError: document.getElementById('history-error'),
     historyList: document.getElementById('history-list'),
     historyLoading: document.getElementById('history-loading'),
     historyEmpty: document.getElementById('history-empty'),
+    modifiersError: document.getElementById('modifiers-error'),
+    modifiersLoading: document.getElementById('modifiers-loading'),
+    modifiersContent: document.getElementById('modifiers-content'),
+    modifiersEmpty: document.getElementById('modifiers-empty'),
+    modifierProduct: document.getElementById('modifier-product'),
+    modifierDateFrom: document.getElementById('modifier-date-from'),
+    modifierDateTo: document.getElementById('modifier-date-to'),
     loadMore: document.getElementById('load-more'),
     summaryDateFrom: document.getElementById('summary-date-from'),
     summaryDateTo: document.getElementById('summary-date-to'),
@@ -92,6 +112,20 @@
 
   function formatQuantity(value) {
     return quantities.format(Number(value || 0));
+  }
+
+  function formatDate(value) {
+    return calendarDate.format(new Date(`${value}T12:00:00Z`));
+  }
+
+  function trendPresentation(current, previous, percentage) {
+    if (Number(previous || 0) === 0 && Number(current || 0) > 0) {
+      return { text: 'Nuevo', className: 'is-up' };
+    }
+    const value = Number(percentage || 0);
+    if (value > 0) return { text: `↑ ${formatQuantity(value)} %`, className: 'is-up' };
+    if (value < 0) return { text: `↓ ${formatQuantity(Math.abs(value))} %`, className: 'is-down' };
+    return { text: 'Sin cambio', className: 'is-flat' };
   }
 
   function vibrate(style) {
@@ -240,6 +274,97 @@
     } finally {
       state.summaryLoading = false;
       document.getElementById('refresh-summary').disabled = false;
+    }
+  }
+
+  function renderSelectedModifierProduct() {
+    const data = state.modifiersData || { products: [] };
+    const products = Array.isArray(data.products) ? data.products : [];
+    const product = products.find((item) => item.key === state.selectedModifierProduct) || products[0];
+    if (!product) return;
+    state.selectedModifierProduct = product.key;
+    elements.modifierProduct.value = product.key;
+    setText('modifier-product-name', product.name || 'Producto');
+    setText('modifier-product-units', `${formatQuantity(product.units)} uds.`);
+    setText('modifier-previous-units', formatQuantity(product.previousUnits));
+    setText('modifier-count', String(Array.isArray(product.modifiers) ? product.modifiers.length : 0));
+    setText(
+      'modifier-comparison-label',
+      `Comparado con ${formatDate(data.previousFrom)} – ${formatDate(data.previousTo)}`
+    );
+    const productTrend = trendPresentation(product.units, product.previousUnits, product.trendPercentage);
+    const trendElement = document.getElementById('modifier-product-trend');
+    trendElement.textContent = productTrend.text;
+    trendElement.className = `trend-value ${productTrend.className}`;
+
+    const list = document.getElementById('modifier-list');
+    list.replaceChildren();
+    const modifiers = Array.isArray(product.modifiers) ? product.modifiers : [];
+    modifiers.forEach((modifier) => {
+      const row = document.createElement('li');
+      const name = document.createElement('div');
+      name.className = 'rank-name';
+      const nameInner = document.createElement('div');
+      const title = document.createElement('strong');
+      title.textContent = modifier.name || 'Modificador';
+      const share = document.createElement('small');
+      share.textContent = `${formatQuantity(modifier.percentage)} % de las unidades`;
+      const trend = trendPresentation(modifier.units, modifier.previousUnits, modifier.trendPercentage);
+      const trendLine = document.createElement('small');
+      trendLine.className = `modifier-trend ${trend.className}`;
+      trendLine.textContent = `${trend.text} · antes ${formatQuantity(modifier.previousUnits)}`;
+      nameInner.append(title, share, trendLine);
+      name.append(nameInner);
+
+      const total = document.createElement('div');
+      total.className = 'rank-total';
+      const quantity = document.createElement('strong');
+      quantity.textContent = `${formatQuantity(modifier.units)} uds.`;
+      const amount = document.createElement('small');
+      amount.textContent = formatMoney(modifier.amount);
+      total.append(quantity, amount);
+      row.append(name, total);
+      list.append(row);
+    });
+  }
+
+  function renderModifierAnalysis(data) {
+    const products = Array.isArray(data.products) ? data.products : [];
+    state.modifiersData = data;
+    elements.modifierProduct.replaceChildren();
+    products.forEach((product) => {
+      const option = document.createElement('option');
+      option.value = product.key;
+      option.textContent = `${product.name} · ${formatQuantity(product.units)} uds.`;
+      elements.modifierProduct.append(option);
+    });
+    if (!products.some((product) => product.key === state.selectedModifierProduct)) {
+      state.selectedModifierProduct = products[0]?.key || '';
+    }
+    elements.modifiersContent.hidden = products.length === 0;
+    elements.modifiersEmpty.hidden = products.length > 0;
+    if (products.length > 0) renderSelectedModifierProduct();
+  }
+
+  async function loadModifiers() {
+    if (state.modifiersLoading) return;
+    state.modifiersLoading = true;
+    clearError(elements.modifiersError);
+    elements.modifiersLoading.hidden = false;
+    document.getElementById('refresh-modifiers').disabled = true;
+    try {
+      const data = await api('modifier_analysis', {
+        from: state.modifiersFrom,
+        to: state.modifiersTo
+      });
+      state.modifiersLoaded = true;
+      renderModifierAnalysis(data);
+    } catch (error) {
+      showError(elements.modifiersError, error.message);
+    } finally {
+      state.modifiersLoading = false;
+      elements.modifiersLoading.hidden = true;
+      document.getElementById('refresh-modifiers').disabled = false;
     }
   }
 
@@ -446,15 +571,29 @@
     elements.summaryDateTo.value = to;
   }
 
+  function setModifierRange(range) {
+    const today = localDateKey(new Date());
+    let from = `${today.slice(0, 7)}-01`;
+    if (range === 'today') from = today;
+    if (range === 'week') from = shiftDateKey(today, -6);
+    if (range === 'year') from = shiftDateKey(today, -364);
+    state.modifiersFrom = from;
+    state.modifiersTo = today;
+    elements.modifierDateFrom.value = from;
+    elements.modifierDateTo.value = today;
+  }
+
   function switchView(viewId) {
     state.activeView = viewId;
     elements.summaryView.hidden = viewId !== 'summary-view';
     elements.historyView.hidden = viewId !== 'history-view';
+    elements.modifiersView.hidden = viewId !== 'modifiers-view';
     document.querySelectorAll('[data-view]').forEach((button) => {
       button.classList.toggle('is-active', button.dataset.view === viewId);
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
     vibrate('light');
+    if (viewId === 'modifiers-view' && !state.modifiersLoaded) loadModifiers();
   }
 
   function bindEvents() {
@@ -494,6 +633,27 @@
       document.querySelectorAll('[data-range]').forEach((item) => item.classList.remove('is-active'));
       loadHistory();
     });
+    document.querySelectorAll('[data-modifier-range]').forEach((button) => {
+      button.addEventListener('click', () => {
+        document.querySelectorAll('[data-modifier-range]').forEach((item) => item.classList.remove('is-active'));
+        button.classList.add('is-active');
+        setModifierRange(button.dataset.modifierRange);
+        vibrate('light');
+        loadModifiers();
+      });
+    });
+    document.getElementById('modifier-date-filter').addEventListener('submit', (event) => {
+      event.preventDefault();
+      state.modifiersFrom = elements.modifierDateFrom.value;
+      state.modifiersTo = elements.modifierDateTo.value;
+      document.querySelectorAll('[data-modifier-range]').forEach((item) => item.classList.remove('is-active'));
+      loadModifiers();
+    });
+    elements.modifierProduct.addEventListener('change', () => {
+      state.selectedModifierProduct = elements.modifierProduct.value;
+      renderSelectedModifierProduct();
+      vibrate('light');
+    });
     document.getElementById('refresh-summary').addEventListener('click', () => loadSummary());
     document.getElementById('toggle-toppings').addEventListener('click', () => {
       state.toppingsExpanded = !state.toppingsExpanded;
@@ -501,6 +661,7 @@
       vibrate('light');
     });
     document.getElementById('refresh-history').addEventListener('click', () => loadHistory());
+    document.getElementById('refresh-modifiers').addEventListener('click', () => loadModifiers());
     elements.loadMore.addEventListener('click', () => {
       if (!state.historyHasMore) return;
       state.historyPage += 1;
@@ -521,6 +682,7 @@
     bindEvents();
     setSummaryPreset('today');
     setHistoryRange('month');
+    setModifierRange('month');
 
     if (telegram) {
       telegram.ready();
