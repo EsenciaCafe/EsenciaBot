@@ -22,7 +22,9 @@ incluidos en `TELEGRAM_ALLOWED_USER_IDS`.
 - Resumen de pedidos vaciados por día desde una base de auditoría independiente.
 - Exclusión reversible de vaciados de prueba mediante un botón privado en Telegram.
 - Panel web dentro de Telegram con ventas, cobros, top de productos e histórico de vaciados.
-- Ranking de toppings de MiniPancakes por intervalo, unificando `Plane` y las raciones sin opciones como `Sin Topping`.
+- Ranking de toppings de MiniPancakes por intervalo, sumando ventas y vaciados contabilizables,
+  mostrando ambos valores por separado y unificando `Plane` y las raciones sin opciones como `Sin Topping`.
+- Tendencias de modificadores que suman ventas y vaciados contabilizables, conservando su desglose.
 - Análisis de modificadores por producto y comparación con el periodo anterior de igual duración.
 - Detalle de cada vaciado con empleado, hora, artículos, modificadores, importe y estado estadístico.
 

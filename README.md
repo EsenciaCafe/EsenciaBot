@@ -6,8 +6,9 @@ vaciados desde el TPV.
 Incluye un menú guiado con botones de periodo, búsqueda de productos, acciones
 reversibles sobre los vaciados, un resumen privado automático al cerrar la caja y
 una Mini App para consultar el panel y el histórico completo desde Telegram,
-incluidos resúmenes por cualquier intervalo de fechas y el ranking de toppings
-de MiniPancakes, además de tendencias de modificadores por producto.
+incluidos resúmenes por cualquier intervalo de fechas, el ranking de toppings de
+MiniPancakes y las tendencias de modificadores por producto, contabilizando por
+separado las unidades vendidas y vaciadas.
 
 ## Arquitectura
 

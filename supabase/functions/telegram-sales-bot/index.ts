@@ -421,7 +421,7 @@ export async function loadVoidLines(period: Period) {
     chunks.push(eventIds.slice(index, index + 100));
   }
   const results = await Promise.all(chunks.map(ids => auditRest('voided_order_lines', {
-    select: 'event_id,item_id,product_key,name,quantity,total_amount',
+    select: 'event_id,item_id,product_key,name,quantity,total_amount,selected_options',
     event_id: `in.(${ids.map(id => `"${id.replaceAll('"', '')}"`).join(',')})`,
     limit: '10000'
   }) as Promise<JsonRecord[]>));
@@ -692,38 +692,67 @@ function summarize(sales: JsonRecord[], payments: JsonRecord[] = []) {
   };
 }
 
-export function summarizePancakeToppings(sales: JsonRecord[], lines: JsonRecord[]) {
+export function summarizePancakeToppings(
+  sales: JsonRecord[],
+  lines: JsonRecord[],
+  voidLines: JsonRecord[] = []
+) {
   const completedSaleIds = new Set(
     sales
       .filter(row => String(row.type || 'sale') !== 'refund')
       .map(row => String(row.id))
   );
-  const pancakeLines = lines.filter(row =>
+  const soldPancakeLines = lines.filter(row =>
     completedSaleIds.has(String(row.sale_id)) && normalize(String(row.name || '')).includes('pancake')
   );
-  const pancakeServings = pancakeLines.reduce(
+  const voidPancakeLines = voidLines.filter(row =>
+    normalize(String(row.name || '')).includes('pancake')
+  );
+  const soldPancakeServings = soldPancakeLines.reduce(
     (sum, row) => sum + Math.max(0, Number(row.quantity || 0)),
     0
   );
-  const toppings = new Map<string, { name: string; units: number; amount: number }>();
-  const addTopping = (name: string, units: number, amount: number) => {
+  const voidPancakeServings = voidPancakeLines.reduce(
+    (sum, row) => sum + Math.max(0, Number(row.quantity || 0)),
+    0
+  );
+  const pancakeServings = soldPancakeServings + voidPancakeServings;
+  const toppings = new Map<string, {
+    name: string;
+    soldUnits: number;
+    voidUnits: number;
+    soldAmount: number;
+    voidAmount: number;
+  }>();
+  const addTopping = (name: string, units: number, amount: number, isVoid: boolean) => {
     const normalizedName = normalize(name);
     const isPlain = ['plane', 'plain', 'sin topping', 'sin toppings'].includes(normalizedName);
     const label = isPlain ? 'Sin Topping' : String(name || 'Topping').trim();
     const key = isPlain ? 'sin-topping' : normalize(label);
-    const current = toppings.get(key) || { name: label, units: 0, amount: 0 };
-    current.units += units;
-    current.amount += amount;
+    const current = toppings.get(key) || {
+      name: label,
+      soldUnits: 0,
+      voidUnits: 0,
+      soldAmount: 0,
+      voidAmount: 0
+    };
+    if (isVoid) {
+      current.voidUnits += units;
+      current.voidAmount += amount;
+    } else {
+      current.soldUnits += units;
+      current.soldAmount += amount;
+    }
     toppings.set(key, current);
   };
 
-  pancakeLines.forEach(line => {
+  const addLineToppings = (line: JsonRecord, isVoid: boolean) => {
     const lineQuantity = Math.max(0, Number(line.quantity || 0));
     const selectedOptions = Array.isArray(line.selected_options)
       ? line.selected_options as JsonRecord[]
       : [];
     if (selectedOptions.length === 0) {
-      addTopping('Sin Topping', lineQuantity, 0);
+      addTopping('Sin Topping', lineQuantity, 0, isVoid);
       return;
     }
     selectedOptions.forEach(option => {
@@ -732,20 +761,32 @@ export function summarizePancakeToppings(sales: JsonRecord[], lines: JsonRecord[
       addTopping(
         String(option.name || 'Topping'),
         units,
-        units * Math.max(0, Number(option.price || 0))
+        units * Math.max(0, Number(option.price || 0)),
+        isVoid
       );
     });
-  });
+  };
+  soldPancakeLines.forEach(line => addLineToppings(line, false));
+  voidPancakeLines.forEach(line => addLineToppings(line, true));
 
   return {
     pancakeServings: Number(pancakeServings.toFixed(3)),
+    soldPancakeServings: Number(soldPancakeServings.toFixed(3)),
+    voidPancakeServings: Number(voidPancakeServings.toFixed(3)),
     items: [...toppings.values()]
-      .map(item => ({
-        name: item.name,
-        units: Number(item.units.toFixed(3)),
-        percentage: pancakeServings ? round(item.units / pancakeServings * 100) : 0,
-        amount: round(item.amount)
-      }))
+      .map(item => {
+        const units = item.soldUnits + item.voidUnits;
+        return {
+          name: item.name,
+          soldUnits: Number(item.soldUnits.toFixed(3)),
+          voidUnits: Number(item.voidUnits.toFixed(3)),
+          units: Number(units.toFixed(3)),
+          percentage: pancakeServings ? round(units / pancakeServings * 100) : 0,
+          soldAmount: round(item.soldAmount),
+          voidAmount: round(item.voidAmount),
+          amount: round(item.soldAmount + item.voidAmount)
+        };
+      })
       .sort((left, right) => right.units - left.units || left.name.localeCompare(right.name, 'es'))
   };
 }
@@ -770,19 +811,29 @@ function canonicalModifierName(rawName: string, productName: string) {
 type ModifierAggregate = {
   key: string;
   name: string;
+  soldUnits: number;
+  voidUnits: number;
   units: number;
+  soldAmount: number;
+  voidAmount: number;
   amount: number;
 };
 
 type ProductModifierAggregate = {
   key: string;
   name: string;
+  soldUnits: number;
+  voidUnits: number;
   units: number;
   hasObservedModifiers: boolean;
   modifiers: Map<string, ModifierAggregate>;
 };
 
-export function aggregateProductModifiers(sales: JsonRecord[], lines: JsonRecord[]) {
+export function aggregateProductModifiers(
+  sales: JsonRecord[],
+  lines: JsonRecord[],
+  voidLines: JsonRecord[] = []
+) {
   const completedSaleIds = new Set(
     sales
       .filter(row => String(row.type || 'sale') !== 'refund')
@@ -790,19 +841,23 @@ export function aggregateProductModifiers(sales: JsonRecord[], lines: JsonRecord
   );
   const products = new Map<string, ProductModifierAggregate>();
 
-  lines.forEach(line => {
-    if (!completedSaleIds.has(String(line.sale_id))) return;
+  const addLine = (line: JsonRecord, isVoid: boolean) => {
+    if (!isVoid && !completedSaleIds.has(String(line.sale_id))) return;
     const productName = String(line.name || 'Artículo').trim();
     const productKey = normalize(productName);
     const lineQuantity = Math.max(0, Number(line.quantity || 0));
     const product = products.get(productKey) || {
       key: productKey,
       name: productName,
+      soldUnits: 0,
+      voidUnits: 0,
       units: 0,
       hasObservedModifiers: false,
       modifiers: new Map<string, ModifierAggregate>()
     };
-    product.units += lineQuantity;
+    if (isVoid) product.voidUnits += lineQuantity;
+    else product.soldUnits += lineQuantity;
+    product.units = product.soldUnits + product.voidUnits;
     const selectedOptions = Array.isArray(line.selected_options)
       ? line.selected_options as JsonRecord[]
       : [];
@@ -819,15 +874,29 @@ export function aggregateProductModifiers(sales: JsonRecord[], lines: JsonRecord
       const modifier = product.modifiers.get(modifierKey) || {
         key: modifierKey,
         name: modifierName,
+        soldUnits: 0,
+        voidUnits: 0,
         units: 0,
+        soldAmount: 0,
+        voidAmount: 0,
         amount: 0
       };
-      modifier.units += units;
-      modifier.amount += units * Math.max(0, Number(option.price || 0));
+      const amount = units * Math.max(0, Number(option.price || 0));
+      if (isVoid) {
+        modifier.voidUnits += units;
+        modifier.voidAmount += amount;
+      } else {
+        modifier.soldUnits += units;
+        modifier.soldAmount += amount;
+      }
+      modifier.units = modifier.soldUnits + modifier.voidUnits;
+      modifier.amount = modifier.soldAmount + modifier.voidAmount;
       product.modifiers.set(modifierKey, modifier);
     });
     products.set(productKey, product);
-  });
+  };
+  lines.forEach(line => addLine(line, false));
+  voidLines.forEach(line => addLine(line, true));
 
   return products;
 }
@@ -861,6 +930,8 @@ export function compareProductModifiers(
         return {
           key: modifierKey,
           name: currentModifier?.name || previousModifier?.name || 'Modificador',
+          soldUnits: Number((currentModifier?.soldUnits || 0).toFixed(3)),
+          voidUnits: Number((currentModifier?.voidUnits || 0).toFixed(3)),
           units: Number(units.toFixed(3)),
           previousUnits: Number(previousModifierUnits.toFixed(3)),
           percentage: currentUnits ? round(units / currentUnits * 100) : 0,
@@ -871,6 +942,8 @@ export function compareProductModifiers(
       return {
         key,
         name: currentProduct?.name || previousProduct?.name || 'Artículo',
+        soldUnits: Number((currentProduct?.soldUnits || 0).toFixed(3)),
+        voidUnits: Number((currentProduct?.voidUnits || 0).toFixed(3)),
         units: Number(currentUnits.toFixed(3)),
         previousUnits: Number(previousUnits.toFixed(3)),
         trendPercentage: percentageChange(currentUnits, previousUnits),
@@ -887,12 +960,14 @@ export async function loadModifierAnalysis(rawFrom?: unknown, rawTo?: unknown) {
   ) + 1;
   const previousTo = shiftDateKey(from, -1);
   const previousFrom = shiftDateKey(previousTo, -(days - 1));
-  const [currentDetails, previousDetails] = await Promise.all([
+  const [currentDetails, previousDetails, currentVoidLines, previousVoidLines] = await Promise.all([
     loadDetails(`range:${from}:${to}`),
-    loadDetails(`range:${previousFrom}:${previousTo}`)
+    loadDetails(`range:${previousFrom}:${previousTo}`),
+    loadVoidLines(`range:${from}:${to}`),
+    loadVoidLines(`range:${previousFrom}:${previousTo}`)
   ]);
-  const current = aggregateProductModifiers(currentDetails.sales, currentDetails.lines);
-  const previous = aggregateProductModifiers(previousDetails.sales, previousDetails.lines);
+  const current = aggregateProductModifiers(currentDetails.sales, currentDetails.lines, currentVoidLines);
+  const previous = aggregateProductModifiers(previousDetails.sales, previousDetails.lines, previousVoidLines);
   return {
     from,
     to,
@@ -942,7 +1017,7 @@ export async function loadWebOverview(rawPeriod: unknown, rawFrom?: unknown, raw
       amount: round(voidSummary.amount),
       units: Number(voidSummary.units.toFixed(3))
     },
-    toppings: summarizePancakeToppings(sales, lines),
+    toppings: summarizePancakeToppings(sales, lines, voidLines),
     top: combinedProductRows(sales, lines, voidLines)
       .filter(row => row.quantity > 0)
       .slice(0, 10)

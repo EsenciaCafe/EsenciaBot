@@ -228,7 +228,10 @@
     const empty = document.getElementById('toppings-empty');
     const toggle = document.getElementById('toggle-toppings');
     const visible = state.toppingsExpanded ? items : items.slice(0, 8);
-    setText('topping-servings', `${formatQuantity(servings)} raciones`);
+    setText(
+      'topping-servings',
+      `${formatQuantity(servings)} raciones · ${formatQuantity(data.soldPancakeServings)} vendidas · ${formatQuantity(data.voidPancakeServings)} vaciadas`
+    );
     list.replaceChildren();
     empty.hidden = items.length > 0;
     visible.forEach((item) => {
@@ -240,7 +243,9 @@
       title.textContent = item.name || 'Topping';
       const share = document.createElement('small');
       share.textContent = `${formatQuantity(item.percentage)} % de las raciones`;
-      nameInner.append(title, share);
+      const split = document.createElement('small');
+      split.textContent = `${formatQuantity(item.soldUnits)} vendidos · ${formatQuantity(item.voidUnits)} vaciados`;
+      nameInner.append(title, share, split);
       name.append(nameInner);
 
       const total = document.createElement('div');
@@ -285,7 +290,10 @@
     state.selectedModifierProduct = product.key;
     elements.modifierProduct.value = product.key;
     setText('modifier-product-name', product.name || 'Producto');
-    setText('modifier-product-units', `${formatQuantity(product.units)} uds.`);
+    setText(
+      'modifier-product-units',
+      `${formatQuantity(product.units)} uds. · ${formatQuantity(product.soldUnits)} vendidas · ${formatQuantity(product.voidUnits)} vaciadas`
+    );
     setText('modifier-previous-units', formatQuantity(product.previousUnits));
     setText('modifier-count', String(Array.isArray(product.modifiers) ? product.modifiers.length : 0));
     setText(
@@ -309,11 +317,13 @@
       title.textContent = modifier.name || 'Modificador';
       const share = document.createElement('small');
       share.textContent = `${formatQuantity(modifier.percentage)} % de las unidades`;
+      const split = document.createElement('small');
+      split.textContent = `${formatQuantity(modifier.soldUnits)} vendidos · ${formatQuantity(modifier.voidUnits)} vaciados`;
       const trend = trendPresentation(modifier.units, modifier.previousUnits, modifier.trendPercentage);
       const trendLine = document.createElement('small');
       trendLine.className = `modifier-trend ${trend.className}`;
       trendLine.textContent = `${trend.text} · antes ${formatQuantity(modifier.previousUnits)}`;
-      nameInner.append(title, share, trendLine);
+      nameInner.append(title, share, split, trendLine);
       name.append(nameInner);
 
       const total = document.createElement('div');
