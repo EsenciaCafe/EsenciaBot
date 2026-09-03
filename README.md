@@ -21,7 +21,7 @@ una Mini App para consultar el panel y el histórico completo desde Telegram.
 
 - `supabase/functions/telegram-sales-bot/`: código del bot y webhook.
 - `supabase-audit/`: configuración y migraciones de la base de auditoría.
-- `web/`: Mini App estática optimizada para móvil y para el tema de Telegram.
+- `dist/`: Mini App estática optimizada para móvil y para el tema de Telegram.
 - `docs/telegram-sales-bot.md`: instalación, secretos y operación.
 
 ## Despliegue

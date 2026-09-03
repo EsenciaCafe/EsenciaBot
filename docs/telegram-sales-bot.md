@@ -83,8 +83,8 @@ en un acceso directo al panel.
 
 ## Mini App y panel web
 
-El contenido de `web/` es estático y puede alojarse en cualquier origen HTTPS. Su
-dirección de API se configura en `web/config.js`; no contiene ninguna clave de
+El contenido de `dist/` es estático y puede alojarse en cualquier origen HTTPS. Su
+dirección de API se configura en `dist/config.js`; no contiene ninguna clave de
 Supabase ni de Telegram.
 
 Cada consulta envía `Telegram.WebApp.initData` a la Edge Function. El servidor:
