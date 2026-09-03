@@ -50,10 +50,17 @@
           </div>
 
           <div class="chip-row" role="group" aria-label="Periodo del resumen">
-            <button class="chip is-active" type="button" data-period="today">Hoy</button>
-            <button class="chip" type="button" data-period="yesterday">Ayer</button>
-            <button class="chip" type="button" data-period="month">Este mes</button>
+            <button class="chip is-active" type="button" data-summary-preset="today">Hoy</button>
+            <button class="chip" type="button" data-summary-preset="yesterday">Ayer</button>
+            <button class="chip" type="button" data-summary-preset="week">7 días</button>
+            <button class="chip" type="button" data-summary-preset="month">Este mes</button>
           </div>
+
+          <form id="summary-date-filter" class="date-filter">
+            <label>Desde<input id="summary-date-from" type="date" required></label>
+            <label>Hasta<input id="summary-date-to" type="date" required></label>
+            <button type="submit">Aplicar</button>
+          </form>
 
           <div id="summary-error" class="inline-error" hidden></div>
 

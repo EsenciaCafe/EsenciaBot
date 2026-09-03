@@ -32,6 +32,8 @@
 
   const state = {
     summaryPeriod: 'today',
+    summaryFrom: '',
+    summaryTo: '',
     historyPage: 0,
     historyHasMore: false,
     historyFrom: '',
@@ -54,6 +56,8 @@
     historyLoading: document.getElementById('history-loading'),
     historyEmpty: document.getElementById('history-empty'),
     loadMore: document.getElementById('load-more'),
+    summaryDateFrom: document.getElementById('summary-date-from'),
+    summaryDateTo: document.getElementById('summary-date-to'),
     dateFrom: document.getElementById('date-from'),
     dateTo: document.getElementById('date-to'),
     detail: document.getElementById('void-detail')
@@ -183,7 +187,11 @@
     clearError(elements.summaryError);
     document.getElementById('refresh-summary').disabled = true;
     try {
-      renderOverview(await api('overview', { period: state.summaryPeriod }));
+      renderOverview(await api('overview', {
+        period: state.summaryPeriod,
+        from: state.summaryFrom,
+        to: state.summaryTo
+      }));
     } catch (error) {
       showError(elements.summaryError, error.message);
       if (throwOnError) throw error;
@@ -375,6 +383,27 @@
     elements.dateTo.value = today;
   }
 
+  function setSummaryPreset(preset) {
+    const today = localDateKey(new Date());
+    let from = today;
+    let to = today;
+    let period = preset;
+    if (preset === 'yesterday') {
+      from = shiftDateKey(today, -1);
+      to = from;
+    }
+    if (preset === 'week') {
+      from = shiftDateKey(today, -6);
+      period = 'range';
+    }
+    if (preset === 'month') from = `${today.slice(0, 7)}-01`;
+    state.summaryPeriod = period;
+    state.summaryFrom = from;
+    state.summaryTo = to;
+    elements.summaryDateFrom.value = from;
+    elements.summaryDateTo.value = to;
+  }
+
   function switchView(viewId) {
     state.activeView = viewId;
     elements.summaryView.hidden = viewId !== 'summary-view';
@@ -390,14 +419,22 @@
     document.querySelectorAll('[data-view]').forEach((button) => {
       button.addEventListener('click', () => switchView(button.dataset.view));
     });
-    document.querySelectorAll('[data-period]').forEach((button) => {
+    document.querySelectorAll('[data-summary-preset]').forEach((button) => {
       button.addEventListener('click', () => {
-        document.querySelectorAll('[data-period]').forEach((item) => item.classList.remove('is-active'));
+        document.querySelectorAll('[data-summary-preset]').forEach((item) => item.classList.remove('is-active'));
         button.classList.add('is-active');
-        state.summaryPeriod = button.dataset.period;
+        setSummaryPreset(button.dataset.summaryPreset);
         vibrate('light');
         loadSummary();
       });
+    });
+    document.getElementById('summary-date-filter').addEventListener('submit', (event) => {
+      event.preventDefault();
+      state.summaryPeriod = 'range';
+      state.summaryFrom = elements.summaryDateFrom.value;
+      state.summaryTo = elements.summaryDateTo.value;
+      document.querySelectorAll('[data-summary-preset]').forEach((item) => item.classList.remove('is-active'));
+      loadSummary();
     });
     document.querySelectorAll('[data-range]').forEach((button) => {
       button.addEventListener('click', () => {
@@ -435,6 +472,7 @@
 
   async function start() {
     bindEvents();
+    setSummaryPreset('today');
     setHistoryRange('month');
 
     if (telegram) {

@@ -24,7 +24,7 @@ const SUPABASE_SERVER_KEY = namedEnvironmentKey(SUPABASE_SECRET_KEYS) ||
   SUPABASE_SERVICE_ROLE_KEY;
 
 type JsonRecord = Record<string, unknown>;
-type Period = 'today' | 'yesterday' | 'month' | `date:${string}`;
+type Period = 'today' | 'yesterday' | 'month' | `date:${string}` | `range:${string}:${string}`;
 
 const MONTH_NUMBERS: Record<string, number> = {
   enero: 1,
@@ -209,6 +209,16 @@ export function periodFor(text: string): Period {
 }
 
 export function periodLabel(period: Period) {
+  if (period.startsWith('range:')) {
+    const { from, to } = periodDateRange(period);
+    const format = (date: string) => new Intl.DateTimeFormat('es-ES', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      timeZone: 'UTC'
+    }).format(new Date(`${date}T12:00:00Z`));
+    return from === to ? `el ${format(from)}` : `del ${format(from)} al ${format(to)}`;
+  }
   if (period.startsWith('date:')) {
     const [year, month, day] = period.slice(5).split('-').map(Number);
     return `el ${new Intl.DateTimeFormat('es-ES', {
@@ -226,6 +236,10 @@ export function periodLabel(period: Period) {
 export function belongsToPeriod(value: string, period: Period) {
   const rowKey = localDateKey(value);
   const today = localDateKey(new Date());
+  if (period.startsWith('range:')) {
+    const { from, to } = periodDateRange(period);
+    return rowKey >= from && rowKey <= to;
+  }
   if (period.startsWith('date:')) return rowKey === period.slice(5);
   if (period === 'yesterday') return rowKey === shiftDateKey(today, -1);
   if (period === 'month') return rowKey.slice(0, 7) === today.slice(0, 7);
@@ -234,6 +248,10 @@ export function belongsToPeriod(value: string, period: Period) {
 
 function periodDateRange(period: Period) {
   const today = localDateKey(new Date());
+  if (period.startsWith('range:')) {
+    const [, from, to] = period.split(':');
+    return { from, to };
+  }
   if (period.startsWith('date:')) {
     const date = period.slice(5);
     return { from: date, to: date };
@@ -410,7 +428,7 @@ export async function loadVoidLines(period: Period) {
   return results.flat();
 }
 
-function validatedDateRange(rawFrom: unknown, rawTo: unknown) {
+export function validatedDateRange(rawFrom: unknown, rawTo: unknown) {
   const today = localDateKey(new Date());
   const defaultFrom = `${today.slice(0, 7)}-01`;
   const from = String(rawFrom || defaultFrom);
@@ -562,20 +580,27 @@ export async function setVoidStatisticsStatus(
 }
 
 async function loadSales(period: Period) {
-  const exactDate = period.startsWith('date:') ? period.slice(5) : '';
-  const lookbackDays = period === 'month' ? 35 : 3;
-  const since = exactDate
-    ? `${shiftDateKey(exactDate, -1)}T22:00:00.000Z`
-    : new Date(Date.now() - lookbackDays * 86400000).toISOString();
-  const rows = await rest('sales', {
-    select: 'id,type,total_amount,payment_method,closed_at,created_at,payload',
-    closed_at: `gte.${since}`,
-    ...(exactDate
-      ? { and: `(closed_at.lte.${shiftDateKey(exactDate, 1)}T02:00:00.000Z)` }
-      : {}),
-    order: 'closed_at.desc',
-    limit: '5000'
-  });
+  const { from, to } = periodDateRange(period);
+  const since = `${shiftDateKey(from, -1)}T22:00:00.000Z`;
+  const until = `${shiftDateKey(to, 1)}T02:00:00.000Z`;
+  const batchSize = 1000;
+  const maximumRows = 25000;
+  const rows: JsonRecord[] = [];
+  for (let offset = 0; offset <= maximumRows; offset += batchSize) {
+    const batch = await rest('sales', {
+      select: 'id,type,total_amount,payment_method,closed_at,created_at,payload',
+      closed_at: `gte.${since}`,
+      and: `(closed_at.lte.${until})`,
+      order: 'closed_at.desc',
+      limit: String(batchSize),
+      offset: String(offset)
+    });
+    rows.push(...batch);
+    if (batch.length < batchSize) break;
+    if (offset + batchSize >= maximumRows) {
+      throw new Error('El intervalo contiene demasiadas ventas. Acota las fechas para obtener un resumen exacto.');
+    }
+  }
   return rows.filter(row => {
     const payload = (row.payload || {}) as JsonRecord;
     const occurredAt = String(payload.createdAt || row.closed_at || row.created_at || '');
@@ -593,25 +618,29 @@ export async function loadDetails(period: Period) {
     chunks.push(saleIds.slice(index, index + 100));
   }
 
-  const results = await Promise.all(chunks.flatMap(ids => {
-    const idFilter = `in.(${ids.map(id => `"${id.replaceAll('"', '')}"`).join(',')})`;
-    return [
-      rest('sale_lines', {
-        select: 'sale_id,item_id,name,quantity,total_amount',
-        sale_id: idFilter,
-        limit: '10000'
-      }),
-      rest('sale_payments', {
-        select: 'sale_id,method,amount',
-        sale_id: idFilter,
-        limit: '10000'
-      })
-    ];
-  }));
-
   const lines: JsonRecord[] = [];
   const payments: JsonRecord[] = [];
-  results.forEach((rows, index) => (index % 2 === 0 ? lines : payments).push(...rows));
+  for (let index = 0; index < chunks.length; index += 10) {
+    const group = chunks.slice(index, index + 10);
+    const results = await Promise.all(group.flatMap(ids => {
+      const idFilter = `in.(${ids.map(id => `"${id.replaceAll('"', '')}"`).join(',')})`;
+      return [
+        rest('sale_lines', {
+          select: 'sale_id,item_id,name,quantity,total_amount',
+          sale_id: idFilter,
+          limit: '10000'
+        }),
+        rest('sale_payments', {
+          select: 'sale_id,method,amount',
+          sale_id: idFilter,
+          limit: '10000'
+        })
+      ];
+    }));
+    results.forEach((rows, resultIndex) =>
+      (resultIndex % 2 === 0 ? lines : payments).push(...rows)
+    );
+  }
   return { sales, lines, payments };
 }
 
@@ -663,8 +692,12 @@ function summarize(sales: JsonRecord[], payments: JsonRecord[] = []) {
   };
 }
 
-function webPeriod(value: unknown): Period {
+export function webPeriod(value: unknown, rawFrom?: unknown, rawTo?: unknown): Period {
   const period = String(value || 'today');
+  if (period === 'range') {
+    const { from, to } = validatedDateRange(rawFrom, rawTo);
+    return `range:${from}:${to}`;
+  }
   if (period === 'today' || period === 'yesterday' || period === 'month') return period;
   if (period.startsWith('date:')) {
     const date = period.slice(5);
@@ -674,8 +707,8 @@ function webPeriod(value: unknown): Period {
   throw new Error('El periodo solicitado no es válido.');
 }
 
-async function loadWebOverview(rawPeriod: unknown) {
-  const period = webPeriod(rawPeriod);
+export async function loadWebOverview(rawPeriod: unknown, rawFrom?: unknown, rawTo?: unknown) {
+  const period = webPeriod(rawPeriod, rawFrom, rawTo);
   const [{ sales, lines, payments }, allVoidOrders, voidLines] = await Promise.all([
     loadDetails(period),
     loadVoidOrders(period, false),
@@ -731,7 +764,7 @@ async function handleWebApp(body: JsonRecord) {
           id: identity.userId,
           firstName: String(identity.user.first_name || '').slice(0, 80)
         },
-        data: await loadWebOverview(body.period)
+        data: await loadWebOverview(body.period, body.from, body.to)
       });
     }
     if (action === 'void_history') {

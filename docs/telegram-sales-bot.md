@@ -7,7 +7,7 @@ incluidos en `TELEGRAM_ALLOWED_USER_IDS`.
 
 ## Funciones incluidas
 
-- Resumen de hoy, ayer o el mes actual.
+- Resumen de hoy, ayer, los últimos siete días, el mes actual o cualquier intervalo personalizado.
 - Total neto, tickets, ticket medio y devoluciones.
 - Desglose de cobros en efectivo, tarjeta y tarjeta regalo.
 - Diez artículos con más unidades registradas, sumando ventas cobradas y vaciados.
@@ -95,7 +95,7 @@ Cada consulta envía `Telegram.WebApp.initData` a la Edge Function. El servidor:
 4. Consulta las bases del TPV y auditoría con las claves que solo existen en el servidor.
 
 Si la página se abre fuera de Telegram, no muestra datos y pide entrar desde el bot.
-El histórico admite intervalos personalizados de hasta cinco años y carga 20
+El resumen y el histórico admiten intervalos personalizados de hasta cinco años. El histórico carga 20
 vaciados por página para mantener una respuesta rápida en el móvil.
 
 ## Consultas de ejemplo
