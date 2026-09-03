@@ -40,7 +40,9 @@
     historyTo: '',
     activeView: 'history-view',
     summaryLoading: false,
-    historyLoading: false
+    historyLoading: false,
+    toppingsExpanded: false,
+    toppingsData: null
   };
 
   const elements = {
@@ -179,6 +181,46 @@
       row.append(name, total);
       list.append(row);
     });
+
+    state.toppingsData = data.toppings || { pancakeServings: 0, items: [] };
+    renderToppings();
+  }
+
+  function renderToppings() {
+    const data = state.toppingsData || { pancakeServings: 0, items: [] };
+    const servings = Number(data.pancakeServings || 0);
+    const items = Array.isArray(data.items) ? data.items : [];
+    const list = document.getElementById('top-toppings');
+    const empty = document.getElementById('toppings-empty');
+    const toggle = document.getElementById('toggle-toppings');
+    const visible = state.toppingsExpanded ? items : items.slice(0, 8);
+    setText('topping-servings', `${formatQuantity(servings)} raciones`);
+    list.replaceChildren();
+    empty.hidden = items.length > 0;
+    visible.forEach((item) => {
+      const row = document.createElement('li');
+      const name = document.createElement('div');
+      name.className = 'rank-name';
+      const nameInner = document.createElement('div');
+      const title = document.createElement('strong');
+      title.textContent = item.name || 'Topping';
+      const share = document.createElement('small');
+      share.textContent = `${formatQuantity(item.percentage)} % de las raciones`;
+      nameInner.append(title, share);
+      name.append(nameInner);
+
+      const total = document.createElement('div');
+      total.className = 'rank-total';
+      const quantity = document.createElement('strong');
+      quantity.textContent = `${formatQuantity(item.units)} uds.`;
+      const amount = document.createElement('small');
+      amount.textContent = formatMoney(item.amount);
+      total.append(quantity, amount);
+      row.append(name, total);
+      list.append(row);
+    });
+    toggle.hidden = items.length <= 8;
+    toggle.textContent = state.toppingsExpanded ? 'Ver menos' : `Ver todos (${items.length})`;
   }
 
   async function loadSummary(throwOnError) {
@@ -453,6 +495,11 @@
       loadHistory();
     });
     document.getElementById('refresh-summary').addEventListener('click', () => loadSummary());
+    document.getElementById('toggle-toppings').addEventListener('click', () => {
+      state.toppingsExpanded = !state.toppingsExpanded;
+      renderToppings();
+      vibrate('light');
+    });
     document.getElementById('refresh-history').addEventListener('click', () => loadHistory());
     elements.loadMore.addEventListener('click', () => {
       if (!state.historyHasMore) return;

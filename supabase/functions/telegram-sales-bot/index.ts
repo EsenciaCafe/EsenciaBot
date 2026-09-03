@@ -626,7 +626,7 @@ export async function loadDetails(period: Period) {
       const idFilter = `in.(${ids.map(id => `"${id.replaceAll('"', '')}"`).join(',')})`;
       return [
         rest('sale_lines', {
-          select: 'sale_id,item_id,name,quantity,total_amount',
+          select: 'sale_id,item_id,name,quantity,total_amount,selected_options',
           sale_id: idFilter,
           limit: '10000'
         }),
@@ -692,6 +692,64 @@ function summarize(sales: JsonRecord[], payments: JsonRecord[] = []) {
   };
 }
 
+export function summarizePancakeToppings(sales: JsonRecord[], lines: JsonRecord[]) {
+  const completedSaleIds = new Set(
+    sales
+      .filter(row => String(row.type || 'sale') !== 'refund')
+      .map(row => String(row.id))
+  );
+  const pancakeLines = lines.filter(row =>
+    completedSaleIds.has(String(row.sale_id)) && normalize(String(row.name || '')).includes('pancake')
+  );
+  const pancakeServings = pancakeLines.reduce(
+    (sum, row) => sum + Math.max(0, Number(row.quantity || 0)),
+    0
+  );
+  const toppings = new Map<string, { name: string; units: number; amount: number }>();
+  const addTopping = (name: string, units: number, amount: number) => {
+    const normalizedName = normalize(name);
+    const isPlain = ['plane', 'plain', 'sin topping', 'sin toppings'].includes(normalizedName);
+    const label = isPlain ? 'Sin Topping' : String(name || 'Topping').trim();
+    const key = isPlain ? 'sin-topping' : normalize(label);
+    const current = toppings.get(key) || { name: label, units: 0, amount: 0 };
+    current.units += units;
+    current.amount += amount;
+    toppings.set(key, current);
+  };
+
+  pancakeLines.forEach(line => {
+    const lineQuantity = Math.max(0, Number(line.quantity || 0));
+    const selectedOptions = Array.isArray(line.selected_options)
+      ? line.selected_options as JsonRecord[]
+      : [];
+    if (selectedOptions.length === 0) {
+      addTopping('Sin Topping', lineQuantity, 0);
+      return;
+    }
+    selectedOptions.forEach(option => {
+      const optionQuantity = Math.max(0, Number(option.qty ?? option.quantity ?? 1));
+      const units = lineQuantity * optionQuantity;
+      addTopping(
+        String(option.name || 'Topping'),
+        units,
+        units * Math.max(0, Number(option.price || 0))
+      );
+    });
+  });
+
+  return {
+    pancakeServings: Number(pancakeServings.toFixed(3)),
+    items: [...toppings.values()]
+      .map(item => ({
+        name: item.name,
+        units: Number(item.units.toFixed(3)),
+        percentage: pancakeServings ? round(item.units / pancakeServings * 100) : 0,
+        amount: round(item.amount)
+      }))
+      .sort((left, right) => right.units - left.units || left.name.localeCompare(right.name, 'es'))
+  };
+}
+
 export function webPeriod(value: unknown, rawFrom?: unknown, rawTo?: unknown): Period {
   const period = String(value || 'today');
   if (period === 'range') {
@@ -732,6 +790,7 @@ export async function loadWebOverview(rawPeriod: unknown, rawFrom?: unknown, raw
       amount: round(voidSummary.amount),
       units: Number(voidSummary.units.toFixed(3))
     },
+    toppings: summarizePancakeToppings(sales, lines),
     top: combinedProductRows(sales, lines, voidLines)
       .filter(row => row.quantity > 0)
       .slice(0, 10)

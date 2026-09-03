@@ -421,6 +421,11 @@ h3 {
   text-align: right;
 }
 
+.compact-button {
+  width: 100%;
+  margin-top: 0.65rem;
+}
+
 .date-filter {
   display: grid;
   grid-template-columns: 1fr 1fr;

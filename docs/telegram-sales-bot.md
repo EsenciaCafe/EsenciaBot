@@ -22,6 +22,7 @@ incluidos en `TELEGRAM_ALLOWED_USER_IDS`.
 - Resumen de pedidos vaciados por día desde una base de auditoría independiente.
 - Exclusión reversible de vaciados de prueba mediante un botón privado en Telegram.
 - Panel web dentro de Telegram con ventas, cobros, top de productos e histórico de vaciados.
+- Ranking de toppings de MiniPancakes por intervalo, unificando `Plane` y las raciones sin opciones como `Sin Topping`.
 - Detalle de cada vaciado con empleado, hora, artículos, modificadores, importe y estado estadístico.
 
 ## 1. Crear el bot y conocer el ID autorizado
