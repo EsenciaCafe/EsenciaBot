@@ -4,7 +4,8 @@ Bot privado de Telegram para consultar las ventas de Esencia y auditar los pedid
 vaciados desde el TPV.
 
 Incluye un menú guiado con botones de periodo, búsqueda de productos, acciones
-reversibles sobre los vaciados y un resumen privado automático al cerrar la caja.
+reversibles sobre los vaciados, un resumen privado automático al cerrar la caja y
+una Mini App para consultar el panel y el histórico completo desde Telegram.
 
 ## Arquitectura
 
@@ -13,12 +14,14 @@ reversibles sobre los vaciados y un resumen privado automático al cerrar la caj
 - Los vaciados se guardan en un proyecto Supabase de auditoría independiente.
 - Los vaciados de prueba pueden excluirse de las estadísticas desde Telegram sin borrarlos.
 - El navegador nunca recibe la clave secreta del proyecto de auditoría.
+- La Mini App valida en el servidor la firma y la antigüedad de la sesión de Telegram.
 - El repositorio `EsenciaTPV` solo conserva los clientes que notifican vaciados y cierres.
 
 ## Estructura
 
 - `supabase/functions/telegram-sales-bot/`: código del bot y webhook.
 - `supabase-audit/`: configuración y migraciones de la base de auditoría.
+- `web/`: Mini App estática optimizada para móvil y para el tema de Telegram.
 - `docs/telegram-sales-bot.md`: instalación, secretos y operación.
 
 ## Despliegue

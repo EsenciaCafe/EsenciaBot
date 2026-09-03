@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#211713">
+    <meta name="description" content="Panel privado de ventas y vaciados de Esencia Café.">
+    <title>Panel · Esencia Café</title>
+    <script src="https://telegram.org/js/telegram-web-app.js?63"></script>
+    <link rel="stylesheet" href="./styles.css">
+    <script src="./config.js"></script>
+    <script src="./app.js" defer></script>
+  </head>
+  <body>
+    <div class="ambient ambient-one" aria-hidden="true"></div>
+    <div class="ambient ambient-two" aria-hidden="true"></div>
+
+    <section id="access-state" class="access-state" aria-live="polite">
+      <div class="brand-mark" aria-hidden="true">E</div>
+      <p class="eyebrow">ESENCIA CAFÉ</p>
+      <h1>Abriendo tu panel…</h1>
+      <p id="access-message">Comprobando el acceso seguro desde Telegram.</p>
+      <div class="loader" aria-hidden="true"><span></span><span></span><span></span></div>
+      <button id="retry-button" class="primary-button" type="button" hidden>Reintentar</button>
+    </section>
+
+    <div id="app" class="app-shell" hidden>
+      <header class="app-header">
+        <div class="brand-row">
+          <div class="brand-mark brand-mark-small" aria-hidden="true">E</div>
+          <div>
+            <p class="eyebrow">ESENCIA CAFÉ</p>
+            <h1>Panel privado</h1>
+          </div>
+        </div>
+        <div class="secure-pill" aria-label="Acceso protegido por Telegram">
+          <span class="secure-dot" aria-hidden="true"></span>
+          Telegram
+        </div>
+      </header>
+
+      <main>
+        <section id="summary-view" class="view" aria-labelledby="summary-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">ACTIVIDAD</p>
+              <h2 id="summary-title">Resumen</h2>
+            </div>
+            <button class="icon-button" id="refresh-summary" type="button" aria-label="Actualizar resumen">↻</button>
+          </div>
+
+          <div class="chip-row" role="group" aria-label="Periodo del resumen">
+            <button class="chip is-active" type="button" data-period="today">Hoy</button>
+            <button class="chip" type="button" data-period="yesterday">Ayer</button>
+            <button class="chip" type="button" data-period="month">Este mes</button>
+          </div>
+
+          <div id="summary-error" class="inline-error" hidden></div>
+
+          <div class="metric-grid" aria-live="polite">
+            <article class="metric-card metric-primary">
+              <span>Ventas netas</span>
+              <strong id="metric-net">—</strong>
+              <small id="metric-period">Hoy</small>
+            </article>
+            <article class="metric-card">
+              <span>Tickets</span>
+              <strong id="metric-tickets">—</strong>
+              <small id="metric-average">Ticket medio —</small>
+            </article>
+            <article class="metric-card metric-warning">
+              <span>Vaciados</span>
+              <strong id="metric-voids">—</strong>
+              <small id="metric-void-units">— artículos</small>
+            </article>
+            <article class="metric-card">
+              <span>Importe vaciado</span>
+              <strong id="metric-void-amount">—</strong>
+              <small id="metric-excluded">Sin exclusiones</small>
+            </article>
+          </div>
+
+          <article class="surface payment-surface">
+            <div class="surface-title-row">
+              <div>
+                <p class="eyebrow">COBROS</p>
+                <h3>Distribución</h3>
+              </div>
+              <span id="payment-total" class="surface-total">—</span>
+            </div>
+            <div class="payment-list">
+              <div><span><i class="payment-swatch cash"></i>Efectivo</span><strong id="payment-cash">—</strong></div>
+              <div><span><i class="payment-swatch card"></i>Tarjeta</span><strong id="payment-card">—</strong></div>
+              <div><span><i class="payment-swatch gift"></i>Tarjeta regalo</span><strong id="payment-gift">—</strong></div>
+            </div>
+          </article>
+
+          <article class="surface">
+            <div class="surface-title-row">
+              <div>
+                <p class="eyebrow">PRODUCTOS</p>
+                <h3>Más registrados</h3>
+              </div>
+            </div>
+            <ol id="top-products" class="ranking-list"></ol>
+            <p id="top-empty" class="empty-copy" hidden>No hay productos registrados en este periodo.</p>
+          </article>
+        </section>
+
+        <section id="history-view" class="view" aria-labelledby="history-title" hidden>
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">AUDITORÍA</p>
+              <h2 id="history-title">Histórico de vaciados</h2>
+            </div>
+            <button class="icon-button" id="refresh-history" type="button" aria-label="Actualizar histórico">↻</button>
+          </div>
+
+          <div class="chip-row" role="group" aria-label="Intervalo del histórico">
+            <button class="chip" type="button" data-range="today">Hoy</button>
+            <button class="chip" type="button" data-range="week">7 días</button>
+            <button class="chip is-active" type="button" data-range="month">Este mes</button>
+            <button class="chip" type="button" data-range="year">12 meses</button>
+          </div>
+
+          <form id="date-filter" class="date-filter">
+            <label>Desde<input id="date-from" type="date" required></label>
+            <label>Hasta<input id="date-to" type="date" required></label>
+            <button type="submit">Aplicar</button>
+          </form>
+
+          <div id="history-error" class="inline-error" hidden></div>
+
+          <article class="history-summary" aria-live="polite">
+            <div><span>Contabilizados</span><strong id="history-counted">—</strong></div>
+            <div><span>Importe</span><strong id="history-amount">—</strong></div>
+            <div><span>Excluidos</span><strong id="history-excluded">—</strong></div>
+          </article>
+
+          <div id="history-list" class="history-list"></div>
+          <div id="history-loading" class="history-loading" hidden>
+            <span></span><span></span><span></span>
+          </div>
+          <div id="history-empty" class="empty-state" hidden>
+            <div aria-hidden="true">✓</div>
+            <h3>No hay vaciados</h3>
+            <p>No se registraron pedidos vaciados en este intervalo.</p>
+          </div>
+          <button id="load-more" class="secondary-button" type="button" hidden>Ver anteriores</button>
+        </section>
+      </main>
+
+      <nav class="bottom-nav" aria-label="Secciones del panel">
+        <button type="button" data-view="summary-view">
+          <span aria-hidden="true">▦</span>
+          Resumen
+        </button>
+        <button class="is-active" type="button" data-view="history-view">
+          <span aria-hidden="true">◷</span>
+          Vaciados
+        </button>
+      </nav>
+    </div>
+
+    <dialog id="void-detail" class="detail-sheet" aria-labelledby="detail-title">
+      <div class="sheet-handle" aria-hidden="true"></div>
+      <header class="sheet-header">
+        <div>
+          <p id="detail-date" class="eyebrow"></p>
+          <h2 id="detail-title">Detalle del vaciado</h2>
+        </div>
+        <button id="close-detail" class="icon-button" type="button" aria-label="Cerrar detalle">×</button>
+      </header>
+      <div class="detail-total-row">
+        <div>
+          <span id="detail-order">Pedido</span>
+          <small id="detail-staff"></small>
+        </div>
+        <strong id="detail-total">—</strong>
+      </div>
+      <div id="detail-status" class="status-badge"></div>
+      <div class="detail-lines-heading">
+        <h3>Artículos</h3>
+        <span id="detail-units"></span>
+      </div>
+      <div id="detail-lines" class="detail-lines"></div>
+      <p id="detail-id" class="event-id"></p>
+    </dialog>
+  </body>
+</html>

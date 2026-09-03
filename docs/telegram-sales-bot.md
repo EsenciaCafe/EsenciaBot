@@ -21,6 +21,8 @@ incluidos en `TELEGRAM_ALLOWED_USER_IDS`.
   vaciados y diferencias del arqueo cerrado.
 - Resumen de pedidos vaciados por día desde una base de auditoría independiente.
 - Exclusión reversible de vaciados de prueba mediante un botón privado en Telegram.
+- Panel web dentro de Telegram con ventas, cobros, top de productos e histórico de vaciados.
+- Detalle de cada vaciado con empleado, hora, artículos, modificadores, importe y estado estadístico.
 
 ## 1. Crear el bot y conocer el ID autorizado
 
@@ -74,6 +76,27 @@ Content-Type: application/json
 
 Comprueba el resultado con `getWebhookInfo` y escribe `/start` al bot.
 Al ejecutar `/start`, el bot registra también su menú de comandos en Telegram.
+La dirección desplegada del panel está incluida como valor predeterminado. El secreto
+opcional `TELEGRAM_WEB_APP_URL` permite sustituirla sin editar el código. Con una URL
+disponible, el bot añade el botón **Abrir panel** y convierte el botón de menú del chat
+en un acceso directo al panel.
+
+## Mini App y panel web
+
+El contenido de `web/` es estático y puede alojarse en cualquier origen HTTPS. Su
+dirección de API se configura en `web/config.js`; no contiene ninguna clave de
+Supabase ni de Telegram.
+
+Cada consulta envía `Telegram.WebApp.initData` a la Edge Function. El servidor:
+
+1. Comprueba la firma HMAC con el token del bot.
+2. Rechaza sesiones con más de una hora de antigüedad.
+3. Comprueba de nuevo que el ID pertenezca a `TELEGRAM_ALLOWED_USER_IDS`.
+4. Consulta las bases del TPV y auditoría con las claves que solo existen en el servidor.
+
+Si la página se abre fuera de Telegram, no muestra datos y pide entrar desde el bot.
+El histórico admite intervalos personalizados de hasta cinco años y carga 20
+vaciados por página para mantener una respuesta rápida en el móvil.
 
 ## Consultas de ejemplo
 

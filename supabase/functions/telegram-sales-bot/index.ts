@@ -1,12 +1,15 @@
 // Bot privado de Esencia: ventas del TPV y auditoría externa de vaciados.
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+const SUPABASE_SECRET_KEYS = Deno.env.get('SUPABASE_SECRET_KEYS') || '';
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') || '';
 const SUPABASE_PUBLISHABLE_KEYS = Deno.env.get('SUPABASE_PUBLISHABLE_KEYS') || '';
 const AUDIT_SUPABASE_URL = Deno.env.get('AUDIT_SUPABASE_URL') || '';
 const AUDIT_SUPABASE_SECRET_KEY = Deno.env.get('AUDIT_SUPABASE_SECRET_KEY') || '';
 const TELEGRAM_BOT_TOKEN = Deno.env.get('TELEGRAM_BOT_TOKEN') || '';
 const TELEGRAM_WEBHOOK_SECRET = Deno.env.get('TELEGRAM_WEBHOOK_SECRET') || '';
+const TELEGRAM_WEB_APP_URL = Deno.env.get('TELEGRAM_WEB_APP_URL') ||
+  'https://esencia-bot-panel.joelb8743.chatgpt.site';
 const TELEGRAM_ALLOWED_USER_IDS = new Set(
   (Deno.env.get('TELEGRAM_ALLOWED_USER_IDS') || '')
     .split(',')
@@ -16,6 +19,9 @@ const TELEGRAM_ALLOWED_USER_IDS = new Set(
 
 const BUSINESS_TIME_ZONE = 'Atlantic/Canary';
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
+const WEB_APP_AUTH_MAX_AGE_SECONDS = 60 * 60;
+const SUPABASE_SERVER_KEY = namedEnvironmentKey(SUPABASE_SECRET_KEYS) ||
+  SUPABASE_SERVICE_ROLE_KEY;
 
 type JsonRecord = Record<string, unknown>;
 type Period = 'today' | 'yesterday' | 'month' | `date:${string}`;
@@ -36,8 +42,28 @@ const MONTH_NUMBERS: Record<string, number> = {
   diciembre: 12
 };
 
+function namedEnvironmentKey(raw: string, name = 'default') {
+  try {
+    const values = JSON.parse(raw) as Record<string, string>;
+    return String(values?.[name] || '');
+  } catch {
+    return '';
+  }
+}
+
+function supabaseApiHeaders(key: string): Record<string, string> {
+  const headers: Record<string, string> = { apikey: key };
+  if (!key.startsWith('sb_secret_') && !key.startsWith('sb_publishable_')) {
+    headers.Authorization = `Bearer ${key}`;
+  }
+  return headers;
+}
+
 export const mainKeyboard = {
   inline_keyboard: [
+    ...(TELEGRAM_WEB_APP_URL
+      ? [[{ text: '📱 Abrir panel', web_app: { url: TELEGRAM_WEB_APP_URL } }]]
+      : []),
     [
       { text: '📊 Hoy', callback_data: 'summary:today' },
       { text: '📅 Ayer', callback_data: 'summary:yesterday' }
@@ -239,6 +265,80 @@ function escapeHtml(value: unknown) {
     .replaceAll('>', '&gt;');
 }
 
+function bytesToHex(bytes: ArrayBuffer) {
+  return [...new Uint8Array(bytes)]
+    .map(byte => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+async function hmacSha256(key: Uint8Array, value: string) {
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    key,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  return await crypto.subtle.sign(
+    'HMAC',
+    cryptoKey,
+    new TextEncoder().encode(value)
+  );
+}
+
+function constantTimeHexEqual(left: string, right: string) {
+  if (left.length !== right.length) return false;
+  let difference = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    difference |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  }
+  return difference === 0;
+}
+
+export async function validateTelegramWebAppData(initData: string, now = new Date()) {
+  if (!initData || initData.length > 10000) {
+    throw new Error('Autorización de Telegram no válida.');
+  }
+
+  const params = new URLSearchParams(initData);
+  const receivedHash = params.get('hash') || '';
+  if (!/^[a-f0-9]{64}$/i.test(receivedHash)) {
+    throw new Error('Autorización de Telegram no válida.');
+  }
+
+  params.delete('hash');
+  const dataCheckString = [...params.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${key}=${value}`)
+    .join('\n');
+  const secretKey = new Uint8Array(await hmacSha256(
+    new TextEncoder().encode('WebAppData'),
+    TELEGRAM_BOT_TOKEN
+  ));
+  const calculatedHash = bytesToHex(await hmacSha256(secretKey, dataCheckString));
+  if (!constantTimeHexEqual(calculatedHash.toLowerCase(), receivedHash.toLowerCase())) {
+    throw new Error('Autorización de Telegram no válida.');
+  }
+
+  const authDate = Number(params.get('auth_date') || 0);
+  const ageSeconds = Math.floor(now.getTime() / 1000) - authDate;
+  if (!Number.isInteger(authDate) || ageSeconds < -300 || ageSeconds > WEB_APP_AUTH_MAX_AGE_SECONDS) {
+    throw new Error('La sesión de Telegram ha caducado. Vuelve a abrir el panel.');
+  }
+
+  let user: JsonRecord;
+  try {
+    user = JSON.parse(params.get('user') || '') as JsonRecord;
+  } catch {
+    throw new Error('Usuario de Telegram no válido.');
+  }
+  const userId = String(user.id || '');
+  if (!TELEGRAM_ALLOWED_USER_IDS.has(userId)) {
+    throw new Error('Este usuario no está autorizado para consultar el TPV.');
+  }
+  return { userId, user };
+}
+
 function paymentBucket(method: string) {
   const value = normalize(method);
   if (value.includes('efectivo')) return 'cash';
@@ -250,10 +350,7 @@ async function rest(path: string, params: Record<string, string>) {
   const url = new URL(`${SUPABASE_URL}/rest/v1/${path}`);
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
   const response = await fetch(url, {
-    headers: {
-      apikey: SUPABASE_SERVICE_ROLE_KEY,
-      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`
-    }
+    headers: supabaseApiHeaders(SUPABASE_SERVER_KEY)
   });
   if (!response.ok) {
     console.error('[telegram-sales-bot] Supabase', response.status, await response.text());
@@ -272,8 +369,7 @@ async function auditRest(
   const response = await fetch(url, {
     ...init,
     headers: {
-      apikey: AUDIT_SUPABASE_SECRET_KEY,
-      Authorization: `Bearer ${AUDIT_SUPABASE_SECRET_KEY}`,
+      ...supabaseApiHeaders(AUDIT_SUPABASE_SECRET_KEY),
       'Content-Type': 'application/json',
       ...(init.headers || {})
     }
@@ -312,6 +408,124 @@ export async function loadVoidLines(period: Period) {
     limit: '10000'
   }) as Promise<JsonRecord[]>));
   return results.flat();
+}
+
+function validatedDateRange(rawFrom: unknown, rawTo: unknown) {
+  const today = localDateKey(new Date());
+  const defaultFrom = `${today.slice(0, 7)}-01`;
+  const from = String(rawFrom || defaultFrom);
+  const to = String(rawTo || today);
+  const validDate = (value: string) => {
+    const [year, month, day] = value.split('-').map(Number);
+    return dateKeyFor(year, month, day) === value;
+  };
+  if (!validDate(from) || !validDate(to) || from > to) {
+    throw new Error('El intervalo de fechas no es válido.');
+  }
+  const span = Math.floor(
+    (Date.parse(`${to}T12:00:00Z`) - Date.parse(`${from}T12:00:00Z`)) / 86400000
+  );
+  if (span > 1826) {
+    throw new Error('El intervalo máximo es de cinco años.');
+  }
+  return { from, to };
+}
+
+async function loadVoidRangeRows(
+  from: string,
+  to: string,
+  select: string,
+  limit: number,
+  offset: number
+) {
+  return await auditRest('voided_orders', {
+    select,
+    business_date: from === to ? `eq.${from}` : `gte.${from}`,
+    ...(from === to ? {} : { and: `(business_date.lte.${to})` }),
+    order: 'occurred_at.desc',
+    limit: String(limit),
+    offset: String(offset)
+  }) as JsonRecord[];
+}
+
+async function loadVoidRangeSummary(from: string, to: string) {
+  const batchSize = 1000;
+  const maximumRows = 10000;
+  const totals = { counted: 0, excluded: 0, amount: 0, units: 0, truncated: false };
+
+  for (let offset = 0; offset < maximumRows; offset += batchSize) {
+    const rows = await loadVoidRangeRows(
+      from,
+      to,
+      'event_id,total_amount,item_units,counts_in_statistics',
+      batchSize,
+      offset
+    );
+    rows.forEach(order => {
+      if (order.counts_in_statistics === false) {
+        totals.excluded += 1;
+        return;
+      }
+      totals.counted += 1;
+      totals.amount += Number(order.total_amount || 0);
+      totals.units += Number(order.item_units || 0);
+    });
+    if (rows.length < batchSize) break;
+    if (offset + batchSize >= maximumRows) totals.truncated = true;
+  }
+
+  return {
+    ...totals,
+    amount: round(totals.amount),
+    units: Number(totals.units.toFixed(3))
+  };
+}
+
+async function loadVoidHistory(rawFrom: unknown, rawTo: unknown, rawPage: unknown) {
+  const { from, to } = validatedDateRange(rawFrom, rawTo);
+  const page = Math.max(0, Math.min(500, Math.floor(Number(rawPage) || 0)));
+  const pageSize = 20;
+  const [pageRows, summary] = await Promise.all([
+    loadVoidRangeRows(
+      from,
+      to,
+      'event_id,occurred_at,business_date,order_name,order_type,staff_name,total_amount,item_units,counts_in_statistics,statistics_excluded_at,statistics_excluded_by',
+      pageSize + 1,
+      page * pageSize
+    ),
+    loadVoidRangeSummary(from, to)
+  ]);
+  const hasMore = pageRows.length > pageSize;
+  const orders = pageRows.slice(0, pageSize);
+  const eventIds = orders.map(order => String(order.event_id)).filter(Boolean);
+  const lines = eventIds.length
+    ? await auditRest('voided_order_lines', {
+      select: 'event_id,line_index,item_id,product_key,name,quantity,total_amount,selected_options',
+      event_id: `in.(${eventIds.map(id => `"${id.replaceAll('"', '')}"`).join(',')})`,
+      order: 'event_id.asc,line_index.asc',
+      limit: '2000'
+    }) as JsonRecord[]
+    : [];
+  const linesByEvent = new Map<string, JsonRecord[]>();
+  lines.forEach(line => {
+    const eventId = String(line.event_id || '');
+    const current = linesByEvent.get(eventId) || [];
+    current.push(line);
+    linesByEvent.set(eventId, current);
+  });
+
+  return {
+    from,
+    to,
+    page,
+    pageSize,
+    hasMore,
+    summary,
+    orders: orders.map(order => ({
+      ...order,
+      lines: linesByEvent.get(String(order.event_id)) || []
+    }))
+  };
 }
 
 async function recordVoidEvent(event: JsonRecord) {
@@ -447,6 +661,93 @@ function summarize(sales: JsonRecord[], payments: JsonRecord[] = []) {
       gift: round(paymentTotals.gift)
     }
   };
+}
+
+function webPeriod(value: unknown): Period {
+  const period = String(value || 'today');
+  if (period === 'today' || period === 'yesterday' || period === 'month') return period;
+  if (period.startsWith('date:')) {
+    const date = period.slice(5);
+    const [year, month, day] = date.split('-').map(Number);
+    if (dateKeyFor(year, month, day) === date) return `date:${date}`;
+  }
+  throw new Error('El periodo solicitado no es válido.');
+}
+
+async function loadWebOverview(rawPeriod: unknown) {
+  const period = webPeriod(rawPeriod);
+  const [{ sales, lines, payments }, allVoidOrders, voidLines] = await Promise.all([
+    loadDetails(period),
+    loadVoidOrders(period, false),
+    loadVoidLines(period)
+  ]);
+  const salesSummary = summarize(sales, payments);
+  const countedVoidOrders = allVoidOrders.filter(order => order.counts_in_statistics !== false);
+  const voidSummary = countedVoidOrders.reduce((result, order) => {
+    result.amount += Number(order.total_amount || 0);
+    result.units += Number(order.item_units || 0);
+    return result;
+  }, { amount: 0, units: 0 });
+
+  return {
+    period,
+    label: periodLabel(period),
+    sales: salesSummary,
+    voids: {
+      counted: countedVoidOrders.length,
+      excluded: allVoidOrders.length - countedVoidOrders.length,
+      amount: round(voidSummary.amount),
+      units: Number(voidSummary.units.toFixed(3))
+    },
+    top: combinedProductRows(sales, lines, voidLines)
+      .filter(row => row.quantity > 0)
+      .slice(0, 10)
+      .map(row => ({
+        ...row,
+        soldTotal: round(row.soldTotal),
+        voidTotal: round(row.voidTotal),
+        total: round(row.total)
+      }))
+  };
+}
+
+async function handleWebApp(body: JsonRecord) {
+  let identity: { userId: string; user: JsonRecord };
+  try {
+    identity = await validateTelegramWebAppData(String(body.initData || ''));
+  } catch (error) {
+    return jsonResponse({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Acceso no autorizado.'
+    }, 401);
+  }
+
+  try {
+    const action = String(body.action || 'overview');
+    if (action === 'overview') {
+      return jsonResponse({
+        ok: true,
+        user: {
+          id: identity.userId,
+          firstName: String(identity.user.first_name || '').slice(0, 80)
+        },
+        data: await loadWebOverview(body.period)
+      });
+    }
+    if (action === 'void_history') {
+      return jsonResponse({
+        ok: true,
+        data: await loadVoidHistory(body.from, body.to, body.page)
+      });
+    }
+    return jsonResponse({ ok: false, error: 'Acción no reconocida.' }, 400);
+  } catch (error) {
+    console.error('[telegram-sales-bot] Error en la Mini App', error);
+    return jsonResponse({
+      ok: false,
+      error: error instanceof Error ? error.message : 'No se pudo cargar el panel.'
+    }, 400);
+  }
 }
 
 function summaryMessage(period: Period, sales: JsonRecord[]) {
@@ -625,6 +926,7 @@ function helpMessage() {
   return [
     '👋 <b>Asistente privado de Esencia</b>',
     '',
+    TELEGRAM_WEB_APP_URL ? 'Pulsa <b>Abrir panel</b> para ver el histórico completo y el detalle de cada vaciado.' : '',
     'Usa los botones o pregúntame directamente:',
     '• “¿Cuánto hemos vendido hoy?”',
     '• “¿Cuántos mini pancakes se vendieron el día 20?”',
@@ -767,6 +1069,15 @@ async function configureTelegramCommands() {
       { command: 'ayuda', description: 'Ver ejemplos y ayuda' }
     ]
   });
+  if (TELEGRAM_WEB_APP_URL) {
+    await telegram('setChatMenuButton', {
+      menu_button: {
+        type: 'web_app',
+        text: 'Panel',
+        web_app: { url: TELEGRAM_WEB_APP_URL }
+      }
+    });
+  }
 }
 
 export function voidStatisticsKeyboard(eventId: string, countsInStatistics: boolean) {
@@ -948,10 +1259,7 @@ async function isTpvInvocation(request: Request) {
     validationUrl.searchParams.set('select', 'id');
     validationUrl.searchParams.set('limit', '0');
     const validation = await fetch(validationUrl, {
-      headers: {
-        apikey: candidate,
-        Authorization: `Bearer ${candidate}`
-      }
+      headers: supabaseApiHeaders(candidate)
     });
     return validation.ok;
   } catch {
@@ -1046,7 +1354,7 @@ async function handleTicketCleared(body: JsonRecord) {
 Deno.serve(async request => {
   if (request.method === 'OPTIONS') return jsonResponse({ ok: true });
   if (request.method !== 'POST') return jsonResponse({ error: 'Método no permitido.' }, 405);
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY ||
+  if (!SUPABASE_URL || !SUPABASE_SERVER_KEY ||
       !AUDIT_SUPABASE_URL || !AUDIT_SUPABASE_SECRET_KEY || !TELEGRAM_BOT_TOKEN ||
       !TELEGRAM_WEBHOOK_SECRET || TELEGRAM_ALLOWED_USER_IDS.size === 0) {
     console.error('[telegram-sales-bot] Faltan secretos obligatorios.');
@@ -1058,6 +1366,10 @@ Deno.serve(async request => {
     body = await request.json() as JsonRecord;
   } catch {
     return jsonResponse({ error: 'JSON no válido.' }, 400);
+  }
+
+  if (body.type === 'web_app') {
+    return await handleWebApp(body);
   }
 
   if (body.type === 'ticket_cleared') {
