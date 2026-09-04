@@ -3,3 +3,6 @@ verify_jwt = false
 
 [functions.esencia-panel-api]
 verify_jwt = false
+
+[functions.esencia-panel-web]
+verify_jwt = false
