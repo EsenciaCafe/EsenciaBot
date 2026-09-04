@@ -28,6 +28,7 @@ en un navegador mediante una cuenta privada configurada desde Telegram.
 - `supabase/functions/esencia-panel-api/`: API de solo lectura y configuración de la cuenta web.
 - `supabase-audit/`: configuración y migraciones de la base de auditoría.
 - `dist/`: Mini App estática optimizada para móvil y para el tema de Telegram.
+- `.github/workflows/deploy-pages.yml`: publicación automática de `dist/` en GitHub Pages.
 - `integration/tpv-statistics/`: cliente y guía para integrar las estadísticas en EsenciaTPV.
 - `docs/telegram-sales-bot.md`: instalación, secretos y operación.
 
@@ -50,3 +51,9 @@ npx supabase db push --linked --workdir supabase-audit
 
 Consulta [la documentación completa](docs/telegram-sales-bot.md) antes de rotar
 secretos o cambiar el webhook.
+
+El panel web se publica desde este repositorio en
+<https://esenciacafe.github.io/EsenciaBot/>. En GitHub, configura **Settings →
+Pages → Build and deployment → Source** como **GitHub Actions**. La interfaz se
+sirve desde GitHub Pages y se conecta directamente a la API privada de solo lectura
+alojada en el proyecto Supabase de Esencia.

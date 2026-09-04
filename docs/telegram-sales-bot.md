@@ -98,6 +98,11 @@ dirección de API se configura en `dist/config.js`. Incluye únicamente una clav
 de Supabase, segura para clientes web; las claves secretas y el token de Telegram permanecen
 en las Edge Functions.
 
+En este repositorio se publica mediante GitHub Actions en
+`https://esenciacafe.github.io/EsenciaBot/`. Para activar el primer despliegue, selecciona
+**GitHub Actions** como origen en **Settings → Pages**. Los cambios posteriores de `dist/`
+se publican automáticamente al actualizar la rama `main`.
+
 Cuando se abre desde el bot, cada consulta envía `Telegram.WebApp.initData` a
 `esencia-panel-api`. El servidor:
 
