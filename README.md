@@ -8,11 +8,13 @@ reversibles sobre los vaciados, un resumen privado automático al cerrar la caja
 una Mini App para consultar el panel y el histórico completo desde Telegram,
 incluidos resúmenes por cualquier intervalo de fechas, el ranking de toppings de
 MiniPancakes y las tendencias de modificadores por producto, contabilizando por
-separado las unidades vendidas y vaciadas.
+separado las unidades vendidas y vaciadas. El mismo panel puede abrirse directamente
+en un navegador mediante una cuenta privada configurada desde Telegram.
 
 ## Arquitectura
 
 - La Edge Function `telegram-sales-bot` se despliega en el proyecto Supabase del TPV.
+- La Edge Function `esencia-panel-api` atiende únicamente las consultas protegidas del panel.
 - Las ventas cobradas se consultan en modo lectura desde la base del TPV.
 - Los vaciados se guardan en un proyecto Supabase de auditoría independiente.
 - Los vaciados de prueba pueden excluirse de las estadísticas desde Telegram sin borrarlos.
@@ -23,8 +25,10 @@ separado las unidades vendidas y vaciadas.
 ## Estructura
 
 - `supabase/functions/telegram-sales-bot/`: código del bot y webhook.
+- `supabase/functions/esencia-panel-api/`: API de solo lectura y configuración de la cuenta web.
 - `supabase-audit/`: configuración y migraciones de la base de auditoría.
 - `dist/`: Mini App estática optimizada para móvil y para el tema de Telegram.
+- `integration/tpv-statistics/`: cliente y guía para integrar las estadísticas en EsenciaTPV.
 - `docs/telegram-sales-bot.md`: instalación, secretos y operación.
 
 ## Despliegue
@@ -34,6 +38,7 @@ Vincula el directorio principal al proyecto Supabase del TPV y despliega:
 ```powershell
 npx supabase link --project-ref <TPV_PROJECT_REF>
 npx supabase functions deploy telegram-sales-bot --no-verify-jwt --use-api
+npx supabase functions deploy esencia-panel-api --no-verify-jwt --use-api
 ```
 
 La base de auditoría se administra por separado:

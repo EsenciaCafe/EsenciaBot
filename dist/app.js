@@ -4,6 +4,9 @@
   const config = window.ESENCIA_CONFIG || {};
   const telegram = window.Telegram && window.Telegram.WebApp;
   const initData = telegram ? telegram.initData : '';
+  const authStorageKey = 'esencia-panel-session-v1';
+  let authSession = null;
+  let refreshPromise = null;
   const money = new Intl.NumberFormat('es-ES', {
     style: 'currency',
     currency: 'EUR',
@@ -44,7 +47,7 @@
     historyHasMore: false,
     historyFrom: '',
     historyTo: '',
-    activeView: 'history-view',
+    activeView: 'summary-view',
     summaryLoading: false,
     historyLoading: false,
     toppingsExpanded: false,
@@ -61,6 +64,10 @@
     access: document.getElementById('access-state'),
     accessMessage: document.getElementById('access-message'),
     retry: document.getElementById('retry-button'),
+    loginForm: document.getElementById('login-form'),
+    loginEmail: document.getElementById('login-email'),
+    loginPassword: document.getElementById('login-password'),
+    loginError: document.getElementById('login-error'),
     app: document.getElementById('app'),
     summaryView: document.getElementById('summary-view'),
     historyView: document.getElementById('history-view'),
@@ -82,7 +89,16 @@
     summaryDateTo: document.getElementById('summary-date-to'),
     dateFrom: document.getElementById('date-from'),
     dateTo: document.getElementById('date-to'),
-    detail: document.getElementById('void-detail')
+    detail: document.getElementById('void-detail'),
+    accountDialog: document.getElementById('account-dialog'),
+    accountForm: document.getElementById('account-form'),
+    accountEmail: document.getElementById('account-email'),
+    accountPassword: document.getElementById('account-password'),
+    accountPasswordConfirm: document.getElementById('account-password-confirm'),
+    accountError: document.getElementById('account-error'),
+    accountSuccess: document.getElementById('account-success'),
+    setupWebAccess: document.getElementById('setup-web-access'),
+    logout: document.getElementById('logout-button')
   };
 
   function localDateKey(date) {
@@ -146,10 +162,91 @@
     element.hidden = true;
   }
 
+  function readAuthSession() {
+    try {
+      const value = JSON.parse(localStorage.getItem(authStorageKey) || 'null');
+      if (!value || !value.access_token || !value.refresh_token) return null;
+      return value;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function saveAuthSession(session) {
+    authSession = {
+      ...session,
+      expires_at: Number(session.expires_at || Math.floor(Date.now() / 1000) + Number(session.expires_in || 3600))
+    };
+    localStorage.setItem(authStorageKey, JSON.stringify(authSession));
+  }
+
+  function clearAuthSession() {
+    authSession = null;
+    localStorage.removeItem(authStorageKey);
+  }
+
+  async function authRequest(path, payload, token) {
+    if (!config.supabaseUrl || !config.supabasePublishableKey) {
+      throw new Error('El acceso web todavía no está configurado.');
+    }
+    const response = await fetch(`${config.supabaseUrl}/auth/v1/${path}`, {
+      method: 'POST',
+      headers: {
+        apikey: config.supabasePublishableKey,
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify(payload || {})
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(body.error_description || body.msg || body.message || 'No se pudo iniciar sesión.');
+    }
+    return body;
+  }
+
+  async function signInWithPassword(email, password) {
+    const session = await authRequest('token?grant_type=password', { email, password });
+    saveAuthSession(session);
+    return session;
+  }
+
+  async function refreshAuthSession() {
+    if (!authSession?.refresh_token) throw new Error('Inicia sesión para consultar el panel.');
+    if (!refreshPromise) {
+      refreshPromise = authRequest('token?grant_type=refresh_token', {
+        refresh_token: authSession.refresh_token
+      }).then(session => {
+        saveAuthSession(session);
+        return authSession.access_token;
+      }).catch(error => {
+        clearAuthSession();
+        throw error;
+      }).finally(() => {
+        refreshPromise = null;
+      });
+    }
+    return await refreshPromise;
+  }
+
+  async function validAccessToken() {
+    if (initData) return '';
+    authSession = authSession || readAuthSession();
+    if (!authSession) throw new Error('Inicia sesión para consultar el panel.');
+    if (Number(authSession.expires_at || 0) > Math.floor(Date.now() / 1000) + 60) {
+      return authSession.access_token;
+    }
+    return await refreshAuthSession();
+  }
+
   async function api(action, payload) {
+    const accessToken = await validAccessToken();
     const response = await fetch(config.apiUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {})
+      },
       body: JSON.stringify({
         type: 'web_app',
         action,
@@ -164,7 +261,9 @@
       throw new Error('El servidor no devolvió una respuesta válida.');
     }
     if (!response.ok || body.ok !== true) {
-      throw new Error(body.error || 'No se pudo cargar la información.');
+      const error = new Error(body.error || 'No se pudo cargar la información.');
+      error.status = response.status;
+      throw error;
     }
     return body.data;
   }
@@ -685,7 +784,89 @@
       if (telegram && telegram.BackButton) telegram.BackButton.hide();
     });
     elements.retry.addEventListener('click', () => window.location.reload());
+    elements.loginForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      clearError(elements.loginError);
+      const button = elements.loginForm.querySelector('button[type="submit"]');
+      button.disabled = true;
+      try {
+        await signInWithPassword(elements.loginEmail.value.trim(), elements.loginPassword.value);
+        elements.loginPassword.value = '';
+        await openPanel('account');
+      } catch (error) {
+        showError(elements.loginError, error.message || 'No se pudo iniciar sesión.');
+      } finally {
+        button.disabled = false;
+      }
+    });
+    elements.setupWebAccess.addEventListener('click', () => {
+      clearError(elements.accountError);
+      elements.accountSuccess.hidden = true;
+      elements.accountDialog.showModal();
+    });
+    document.getElementById('close-account').addEventListener('click', () => elements.accountDialog.close());
+    elements.accountForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      clearError(elements.accountError);
+      elements.accountSuccess.hidden = true;
+      if (elements.accountPassword.value !== elements.accountPasswordConfirm.value) {
+        showError(elements.accountError, 'Las contraseñas no coinciden.');
+        return;
+      }
+      const button = document.getElementById('create-account-button');
+      button.disabled = true;
+      try {
+        const email = elements.accountEmail.value.trim();
+        const password = elements.accountPassword.value;
+        await api('configure_web_account', { email, password });
+        await signInWithPassword(email, password);
+        elements.accountPassword.value = '';
+        elements.accountPasswordConfirm.value = '';
+        elements.accountSuccess.textContent = 'Cuenta creada. Ya puedes abrir esta dirección desde cualquier navegador.';
+        elements.accountSuccess.hidden = false;
+      } catch (error) {
+        showError(elements.accountError, error.message || 'No se pudo crear la cuenta.');
+      } finally {
+        button.disabled = false;
+      }
+    });
+    elements.logout.addEventListener('click', async () => {
+      const token = authSession?.access_token || '';
+      try {
+        if (token) await authRequest('logout', {}, token);
+      } catch (_) {
+        // La sesión local se elimina aunque el servidor ya la haya invalidado.
+      }
+      clearAuthSession();
+      elements.app.hidden = true;
+      showLogin();
+    });
     if (telegram && telegram.BackButton) telegram.BackButton.onClick(closeDetail);
+  }
+
+  function showLogin(message) {
+    elements.access.hidden = false;
+    elements.access.querySelector('h1').textContent = 'Entrar al panel';
+    elements.accessMessage.textContent = message || 'Consulta las ventas y los vaciados de Esencia desde cualquier dispositivo.';
+    elements.access.querySelector('.loader').hidden = true;
+    elements.retry.hidden = true;
+    elements.loginForm.hidden = false;
+    elements.loginEmail.focus();
+  }
+
+  async function openPanel(accessMode) {
+    await Promise.all([
+      loadSummary(true),
+      loadHistory({ throwOnError: true })
+    ]);
+    elements.access.hidden = true;
+    elements.loginForm.hidden = true;
+    elements.app.hidden = false;
+    const isTelegram = accessMode === 'telegram';
+    setText('access-mode-label', isTelegram ? 'Telegram' : 'Cuenta');
+    elements.setupWebAccess.hidden = !isTelegram;
+    elements.logout.hidden = isTelegram;
+    switchView('summary-view');
   }
 
   async function start() {
@@ -710,22 +891,21 @@
       elements.retry.hidden = false;
       return;
     }
-    if (!initData) {
-      elements.access.querySelector('h1').textContent = 'Abre el panel desde Telegram';
-      elements.accessMessage.textContent = 'Por seguridad, esta información solo se muestra al entrar desde el botón del bot de Esencia.';
-      elements.access.querySelector('.loader').hidden = true;
-      return;
-    }
-
     try {
-      await Promise.all([
-        loadSummary(true),
-        loadHistory({ throwOnError: true })
-      ]);
-      elements.access.hidden = true;
-      elements.app.hidden = false;
-      switchView('history-view');
+      if (!initData) {
+        authSession = readAuthSession();
+        if (!authSession) {
+          showLogin();
+          return;
+        }
+      }
+      await openPanel(initData ? 'telegram' : 'account');
     } catch (error) {
+      if (!initData && (error.status === 401 || !authSession)) {
+        clearAuthSession();
+        showLogin(error.message);
+        return;
+      }
       elements.access.querySelector('h1').textContent = 'No se pudo abrir el panel';
       elements.accessMessage.textContent = error.message || 'Vuelve a intentarlo desde el bot.';
       elements.access.querySelector('.loader').hidden = true;

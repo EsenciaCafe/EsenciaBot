@@ -499,7 +499,7 @@ async function loadVoidRangeSummary(from: string, to: string) {
   };
 }
 
-async function loadVoidHistory(rawFrom: unknown, rawTo: unknown, rawPage: unknown) {
+export async function loadVoidHistory(rawFrom: unknown, rawTo: unknown, rawPage: unknown) {
   const { from, to } = validatedDateRange(rawFrom, rawTo);
   const page = Math.max(0, Math.min(500, Math.floor(Number(rawPage) || 0)));
   const pageSize = 20;
@@ -1676,7 +1676,7 @@ async function handleTicketCleared(body: JsonRecord) {
   return jsonResponse({ ok: true, notificationMessageIds });
 }
 
-Deno.serve(async request => {
+export async function handleTelegramSalesBotRequest(request: Request) {
   if (request.method === 'OPTIONS') return jsonResponse({ ok: true });
   if (request.method !== 'POST') return jsonResponse({ error: 'Método no permitido.' }, 405);
   if (!SUPABASE_URL || !SUPABASE_SERVER_KEY ||
@@ -1887,4 +1887,6 @@ Deno.serve(async request => {
     console.error('[telegram-sales-bot] Error inesperado', error);
     return jsonResponse({ ok: true });
   }
-});
+}
+
+if (import.meta.main) Deno.serve(handleTelegramSalesBotRequest);

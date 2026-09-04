@@ -21,6 +21,13 @@
       <h1>Abriendo tu panel…</h1>
       <p id="access-message">Comprobando el acceso seguro desde Telegram.</p>
       <div class="loader" aria-hidden="true"><span></span><span></span><span></span></div>
+      <form id="login-form" class="auth-form" hidden>
+        <label>Correo electrónico<input id="login-email" type="email" autocomplete="username" required></label>
+        <label>Contraseña<input id="login-password" type="password" autocomplete="current-password" minlength="10" required></label>
+        <div id="login-error" class="inline-error" role="alert" hidden></div>
+        <button class="primary-button" type="submit">Entrar</button>
+        <small>La cuenta se configura una sola vez desde el bot de Telegram.</small>
+      </form>
       <button id="retry-button" class="primary-button" type="button" hidden>Reintentar</button>
     </section>
 
@@ -33,9 +40,13 @@
             <h1>Panel privado</h1>
           </div>
         </div>
-        <div class="secure-pill" aria-label="Acceso protegido por Telegram">
-          <span class="secure-dot" aria-hidden="true"></span>
-          Telegram
+        <div class="header-actions">
+          <button id="setup-web-access" class="secure-pill" type="button" hidden>Acceso web</button>
+          <button id="logout-button" class="secure-pill" type="button" hidden>Salir</button>
+          <div class="secure-pill" aria-label="Tipo de acceso actual">
+            <span class="secure-dot" aria-hidden="true"></span>
+            <span id="access-mode-label">Telegram</span>
+          </div>
         </div>
       </header>
 
@@ -265,6 +276,25 @@
       </div>
       <div id="detail-lines" class="detail-lines"></div>
       <p id="detail-id" class="event-id"></p>
+    </dialog>
+
+    <dialog id="account-dialog" class="account-dialog" aria-labelledby="account-title">
+      <form id="account-form" class="auth-form">
+        <div class="account-heading">
+          <div>
+            <p class="eyebrow">ACCESO INDEPENDIENTE</p>
+            <h2 id="account-title">Crear cuenta web</h2>
+          </div>
+          <button id="close-account" class="icon-button" type="button" aria-label="Cerrar">×</button>
+        </div>
+        <p>Utiliza esta cuenta para abrir el panel directamente desde cualquier navegador.</p>
+        <label>Correo electrónico<input id="account-email" type="email" autocomplete="username" required></label>
+        <label>Contraseña<input id="account-password" type="password" autocomplete="new-password" minlength="10" maxlength="128" required></label>
+        <label>Repetir contraseña<input id="account-password-confirm" type="password" autocomplete="new-password" minlength="10" maxlength="128" required></label>
+        <div id="account-error" class="inline-error" role="alert" hidden></div>
+        <p id="account-success" class="inline-success" hidden></p>
+        <button id="create-account-button" class="primary-button" type="submit">Crear acceso</button>
+      </form>
     </dialog>
   </body>
 </html>

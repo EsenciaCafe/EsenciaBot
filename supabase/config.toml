@@ -1,2 +1,5 @@
 [functions.telegram-sales-bot]
 verify_jwt = false
+
+[functions.esencia-panel-api]
+verify_jwt = false

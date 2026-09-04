@@ -22,11 +22,15 @@ incluidos en `TELEGRAM_ALLOWED_USER_IDS`.
 - Resumen de pedidos vaciados por día desde una base de auditoría independiente.
 - Exclusión reversible de vaciados de prueba mediante un botón privado en Telegram.
 - Panel web dentro de Telegram con ventas, cobros, top de productos e histórico de vaciados.
+- Acceso independiente con correo y contraseña; la cuenta solo puede crearse desde un usuario
+  de Telegram autorizado y la sesión queda guardada en cada navegador.
 - Ranking de toppings de MiniPancakes por intervalo, sumando ventas y vaciados contabilizables,
   mostrando ambos valores por separado y unificando `Plane` y las raciones sin opciones como `Sin Topping`.
 - Tendencias de modificadores que suman ventas y vaciados contabilizables, conservando su desglose.
 - Análisis de modificadores por producto y comparación con el periodo anterior de igual duración.
 - Detalle de cada vaciado con empleado, hora, artículos, modificadores, importe y estado estadístico.
+- Cliente reutilizable e instrucciones para integrar las mismas vistas en EsenciaTPV sin duplicar
+  consultas ni exponer secretos.
 
 ## 1. Crear el bot y conocer el ID autorizado
 
@@ -56,11 +60,13 @@ guarda como secreto de la Edge Function. Nunca se expone al navegador.
 
 ```powershell
 npx supabase functions deploy telegram-sales-bot
+npx supabase functions deploy esencia-panel-api
 ```
 
-La función tiene `verify_jwt = false` porque Telegram no envía un JWT de Supabase.
-La petición se autentica con el encabezado secreto del webhook y, después, se
-autoriza de nuevo mediante el ID del usuario.
+Ambas funciones tienen `verify_jwt = false` porque deben aceptar la firma propia de Telegram.
+`telegram-sales-bot` autentica el webhook y autoriza de nuevo el ID del usuario.
+`esencia-panel-api` no acepta avisos ni escrituras del TPV: solo ofrece las consultas del panel,
+validadas mediante Telegram o una sesión de Supabase Auth con permiso interno.
 
 ## 4. Registrar el webhook
 
@@ -88,17 +94,21 @@ en un acceso directo al panel.
 ## Mini App y panel web
 
 El contenido de `dist/` es estático y puede alojarse en cualquier origen HTTPS. Su
-dirección de API se configura en `dist/config.js`; no contiene ninguna clave de
-Supabase ni de Telegram.
+dirección de API se configura en `dist/config.js`. Incluye únicamente una clave publicable
+de Supabase, segura para clientes web; las claves secretas y el token de Telegram permanecen
+en las Edge Functions.
 
-Cada consulta envía `Telegram.WebApp.initData` a la Edge Function. El servidor:
+Cuando se abre desde el bot, cada consulta envía `Telegram.WebApp.initData` a
+`esencia-panel-api`. El servidor:
 
 1. Comprueba la firma HMAC con el token del bot.
 2. Rechaza sesiones con más de una hora de antigüedad.
 3. Comprueba de nuevo que el ID pertenezca a `TELEGRAM_ALLOWED_USER_IDS`.
 4. Consulta las bases del TPV y auditoría con las claves que solo existen en el servidor.
 
-Si la página se abre fuera de Telegram, no muestra datos y pide entrar desde el bot.
+Desde Telegram se puede crear una cuenta web con correo y contraseña. Fuera de Telegram,
+el panel solicita esa cuenta, conserva la sesión en el navegador y la renueva automáticamente.
+La autorización se guarda en `app_metadata`, que el usuario no puede modificar.
 El resumen y el histórico admiten intervalos personalizados de hasta cinco años. El histórico carga 20
 vaciados por página para mantener una respuesta rápida en el móvil.
 
