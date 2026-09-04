@@ -98,10 +98,11 @@ dirección de API se configura en `dist/config.js`. Incluye únicamente una clav
 de Supabase, segura para clientes web; las claves secretas y el token de Telegram permanecen
 en las Edge Functions.
 
-Actualmente se publica mediante la Edge Function estática `esencia-panel-web` en
-`https://tbqvypdxcgeofsmiqmuo.supabase.co/functions/v1/esencia-panel-web/`. La
-función solo sirve los archivos del panel; no consulta tablas ni contiene claves secretas.
-El flujo de GitHub Pages incluido en el repositorio queda como alternativa futura.
+El panel se publica desde `dist/` mediante GitHub Actions en
+`https://esenciacafe.github.io/EsenciaBot/`. En GitHub debe estar seleccionada la
+opción **Settings → Pages → Source: GitHub Actions**. La Edge Function
+`esencia-panel-web` queda únicamente como alojamiento alternativo y no es necesaria
+para este despliegue.
 
 Cuando se abre desde el bot, cada consulta envía `Telegram.WebApp.initData` a
 `esencia-panel-api`. El servidor:

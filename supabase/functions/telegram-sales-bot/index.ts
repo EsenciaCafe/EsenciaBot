@@ -9,7 +9,7 @@ const AUDIT_SUPABASE_SECRET_KEY = Deno.env.get('AUDIT_SUPABASE_SECRET_KEY') || '
 const TELEGRAM_BOT_TOKEN = Deno.env.get('TELEGRAM_BOT_TOKEN') || '';
 const TELEGRAM_WEBHOOK_SECRET = Deno.env.get('TELEGRAM_WEBHOOK_SECRET') || '';
 const TELEGRAM_WEB_APP_URL = Deno.env.get('TELEGRAM_WEB_APP_URL') ||
-  'https://tbqvypdxcgeofsmiqmuo.supabase.co/functions/v1/esencia-panel-web/';
+  'https://esenciacafe.github.io/EsenciaBot/';
 const TELEGRAM_ALLOWED_USER_IDS = new Set(
   (Deno.env.get('TELEGRAM_ALLOWED_USER_IDS') || '')
     .split(',')
